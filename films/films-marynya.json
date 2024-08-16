@@ -1,0 +1,12 @@
+{
+  "updated_at": "2024-08-13T06:36:44.016-04:00",
+  "count": 1,
+  "films": [
+    {
+      "title": "Barbie",
+      "year": "2023",
+      "rating": 4,
+      "permalink": "barbie"
+    }
+  ]
+}
