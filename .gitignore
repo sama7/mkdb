@@ -1,6 +1,7 @@
 # Server directories and files
 
 node_modules/
+films/
 
 
 # Remaining: Client directories and files
