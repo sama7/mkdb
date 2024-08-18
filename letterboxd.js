@@ -133,7 +133,6 @@ async function scrapeFilms(browser, username) {
                 }
             }
 
-
             if (value === null) {
                 console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug}' after ${maxRetries} attempts`);
             }
@@ -147,7 +146,6 @@ async function scrapeFilms(browser, username) {
             // Wait for non-null values
             const title = await waitForAttribute(titleElement, 'data-film-name');
             const year = await waitForAttribute(titleElement, 'data-film-release-year');
-
 
             const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
 
@@ -219,15 +217,3 @@ async function main() {
 }
 
 main();
-
-// getUsernames()
-//     .then(usernames => console.log(usernames))
-//     .catch(error => console.error(`Error getting usernames: ${error}`));
-
-// gonna fix this after i export following list to get array of username URLs
-// scrapeFilms().then(films => {
-
-
-// }).catch(error => {
-//     console.error('Error scraping films:', error)
-// })
