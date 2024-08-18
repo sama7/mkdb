@@ -2,7 +2,7 @@
 
 node_modules/
 films/
-
+logs/
 
 # Remaining: Client directories and files
 
