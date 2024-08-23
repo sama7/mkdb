@@ -1,13 +1,13 @@
-import { promises as fs } from 'fs';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import Adblocker from 'puppeteer-extra-plugin-adblocker';
-import { DateTime } from 'luxon';
+import 'dotenv/config';
+import pg from 'pg';
 
 puppeteer.use(StealthPlugin());
 puppeteer.use(Adblocker({ blockTrackers: true }));
 
-async function getUsernames(browser) {
+async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
 
     const page = (await browser.pages())[0];
@@ -42,9 +42,22 @@ async function getUsernames(browser) {
                     }
                 }
             });
-
             return names;
         });
+
+        // Insert each username into the database if it doesn't already exist
+        for (const username of pageUsernames) {
+            try {
+                await client.query(
+                    `INSERT INTO users (username, time_created, time_modified) 
+                     VALUES ($1, NOW(), NOW()) 
+                     ON CONFLICT (username) DO NOTHING`,
+                    [username]
+                );
+            } catch (err) {
+                console.error(`Failed to insert username ${username}:`, err.stack);
+            }
+        }
 
         console.log(`Number of users found on Page ${pageNum}: ${pageUsernames.length}`);
 
@@ -71,10 +84,9 @@ async function getUsernames(browser) {
     return usernames;
 }
 
-async function scrapeFilms(browser, username) {
+async function scrapeFilms(browser, client, username) {
     const start = performance.now();
-    const URL = `https://letterboxd.com/${username}/films/rated/.5-5/page/`
-    const OUTPUT_FILE = `films-${username}.json`;
+    const URL = `https://letterboxd.com/${username}/films/rated/.5-5/page/`;
 
     const page = await browser.newPage();
     // page.on('console', msg => console.log('PAGE LOG:', msg.text()));
@@ -145,9 +157,12 @@ async function scrapeFilms(browser, username) {
 
             // Wait for non-null values
             const title = await waitForAttribute(titleElement, 'data-film-name');
-            const year = await waitForAttribute(titleElement, 'data-film-release-year');
-
+            let year = await waitForAttribute(titleElement, 'data-film-release-year');
             const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
+
+            if (year === "") {
+                year = null; // Replace empty string with null, as database only accepts integers or null
+            }
 
             // Wait for the "rated-x" class to appear within the "poster-viewingdata" element
             const ratingClass = await filmElement.$eval('.poster-viewingdata span[class*="rated-"]', el => {
@@ -162,57 +177,140 @@ async function scrapeFilms(browser, username) {
                 rating = ratingValue / 2; // Convert to actual rating (e.g., 10 -> 5.0)
             }
 
-            // Push the extracted data into the films array
+            // Push the extracted data into the films array ()
             films.push({ title, year, rating, permalink });
+
+            // Insert or update film in the database
+            const filmInsertQuery = `
+                INSERT INTO films (title, year, slug, time_created, time_modified)
+                VALUES ($1, $2, $3, NOW(), NOW())
+                ON CONFLICT (slug) DO NOTHING
+                RETURNING film_id;
+            `;
+            let filmId;
+
+            try {
+                const result = await client.query(filmInsertQuery, [title, year, permalink]);
+                filmId = result.rows.length > 0 ? result.rows[0].film_id : null;
+            } catch (err) {
+                console.error(`Failed to insert film '${permalink}':`, err.stack);
+                continue;
+            }
+
+            if (!filmId) {
+                // If the film already exists, get its film_id
+                const getFilmIdQuery = `SELECT film_id FROM films WHERE slug = $1`;
+                try {
+                    const result = await client.query(getFilmIdQuery, [permalink]);
+                    filmId = result.rows[0].film_id;
+                } catch (err) {
+                    console.error(`Failed to retrieve film_id for film '${permalink}':`, err.stack);
+                    continue;
+                }
+            }
+
+            // Insert or update rating in the database
+            const ratingInsertQuery = `
+                INSERT INTO ratings (user_id, film_id, rating, time_created, time_modified)
+                VALUES ((SELECT user_id FROM users WHERE username = $1), $2, $3, NOW(), NOW())
+                ON CONFLICT (user_id, film_id) DO UPDATE
+                SET rating = EXCLUDED.rating, time_modified = NOW()
+                WHERE ratings.rating <> EXCLUDED.rating;
+            `;
+
+            try {
+                await client.query(ratingInsertQuery, [username, filmId, rating]);
+            } catch (err) {
+                console.error(`Failed to insert or update rating for film '${permalink}' by user '${username}':`, err.stack);
+            }
         }
+        // Add a random delay between 1 to 3 seconds before moving on to the next page of films
+        const delay = Math.floor(Math.random() * 2000) + 1000;
+        await new Promise(resolve => setTimeout(resolve, delay))
     }
     await page.close();
     console.log(`Total films for user '${username}': ${films.length}`);
-
-    const updated_at = DateTime.now();
-    const outputData = {
-        updated_at,
-        count: films.length,
-        films
-    }
-
-    await fs.writeFile(`films/${OUTPUT_FILE}`, JSON.stringify(outputData, null, 2));
-
     const finish = performance.now();
     console.log(`Film scraping for user '${username}' took ${((finish - start) / 1000).toFixed(2)} seconds`);
 }
 
 async function main() {
+    const start = performance.now();
+    const { Client } = pg;
+    const client = new Client({
+        user: 'samah',
+        password: process.env.DEV_DB_PASSWORD,
+        host: 'localhost',
+        database: 'mkdb',
+        port: process.env.PORT || 5432,
+    });
+    const browser = await puppeteer.launch({ headless: 'shell' });
     try {
-        const start = performance.now();
-        const browser = await puppeteer.launch({ headless: 'shell' });
-        const usernames = await getUsernames(browser);
+        await client.connect()
+            .then(() => console.log('Connected to PostgreSQL database'))
+            .catch(err => console.error('Connection error', err.stack));
 
-        // Helper function to split an array into chunks
-        function chunkArray(array, chunkSize) {
-            const chunks = [];
-            for (let i = 0; i < array.length; i += chunkSize) {
-                chunks.push(array.slice(i, i + chunkSize));
-            }
-            return chunks;
+        const usernames = await scrapeUsernames(browser, client);
+
+        // IGNORE BELOW CODE; for getting a specific range of usernames only
+        // particularly if program times out..
+
+        // // Define the SQL query
+        // const query = `
+        //     SELECT username
+        //     FROM users
+        //     WHERE user_id >= $1
+        //     ORDER BY user_id ASC;
+        // `;
+
+        // // Execute the query and store the results in the usernames array
+        // let usernames = [];
+
+        // try {
+        //     const result = await client.query(query, [203]); // 203 is the starting user_id
+        //     usernames = result.rows.map(row => row.username); // Extract the usernames from the result set
+        //     console.log(`Fetched ${usernames.length} usernames with user_id >= 203`);
+        // } catch (err) {
+        //     console.error('Error fetching usernames from the database:', err.stack);
+        // }
+
+        // IGNORE BELOW CODE: for running concurrently in batches of 10 only
+
+        // // Helper function to split an array into chunks
+        // function chunkArray(array, chunkSize) {
+        //     const chunks = [];
+        //     for (let i = 0; i < array.length; i += chunkSize) {
+        //         chunks.push(array.slice(i, i + chunkSize));
+        //     }
+        //     return chunks;
+        // }
+
+        // // Split the usernames array into chunks of 10
+        // const chunks = chunkArray(usernames, 10);
+        // console.log(`Splitting users into ${chunks.length} chunks, scraping films of no more than 10 users concurrently`);
+
+        // // Process each chunk sequentially
+        // for (const [i, chunk] of chunks.entries()) {
+        //     console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
+        //     await Promise.all(chunk.map(username => scrapeFilms(browser, username)));
+        //     console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
+        // }
+
+        for (const username of usernames) {
+            await scrapeFilms(browser, client, username);
+            // Add a random delay between 1 to 3 seconds
+            const delay = Math.floor(Math.random() * 2000) + 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
 
-        // Split the usernames array into chunks of 10
-        const chunks = chunkArray(usernames, 10);
-        console.log(`Splitting users into ${chunks.length} chunks, scraping films of no more than 10 users concurrently`);
-
-        // Process each chunk sequentially
-        for (const [i, chunk] of chunks.entries()) {
-            console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-            await Promise.all(chunk.map(username => scrapeFilms(browser, username)));
-            console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-        }
-
-        await browser.close();
         const finish = performance.now();
         console.log(`Film scraping for all users took ${((finish - start) / 1000).toFixed(2)} seconds`);
     } catch (error) {
         console.error(`Error in main(): ${error}`);
+    } finally {
+        await client.end();
+        console.log('Disconnected from PostgreSQL database');
+        await browser.close();
     }
 }
 

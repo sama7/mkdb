@@ -3,6 +3,7 @@
 node_modules/
 films/
 logs/
+.env
 
 # Remaining: Client directories and files
 
