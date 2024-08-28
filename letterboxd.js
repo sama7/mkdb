@@ -354,7 +354,16 @@ async function main() {
         database: 'mkdb',
         port: process.env.DB_PORT || 5432,
     });
-    const browser = await puppeteer.launch({ headless: 'shell' });
+    let browser;
+    if (process.env.NODE_ENV === 'production') {
+        // specify chromium path for ubuntu
+        browser = await puppeteer.launch({
+            headless: 'shell',
+            executablePath: '/usr/bin/chromium-browser',
+        })
+    } else {
+        browser = await puppeteer.launch({ headless: 'shell' });
+    }
     try {
         await client.connect()
             .then(() => console.log('Connected to PostgreSQL database'))
