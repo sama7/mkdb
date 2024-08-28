@@ -1,6 +1,9 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import Adblocker from 'puppeteer-extra-plugin-adblocker';
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
 import 'dotenv/config';
 import pg from 'pg';
 
@@ -234,15 +237,122 @@ async function scrapeFilms(browser, client, username) {
     console.log(`Film scraping for user '${username}' took ${((finish - start) / 1000).toFixed(2)} seconds`);
 }
 
+async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 60000 }) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            await page.goto(url, options);
+            return; // Successfully loaded the page
+        } catch (err) {
+            console.warn(`Attempt ${attempt} failed for ${url}: ${err.message}`);
+            if (attempt === 3) throw err; // Re-throw after 3 attempts
+        }
+    }
+}
+
+async function downloadImage(url, dest) {
+    const file = fs.createWriteStream(dest);
+    return new Promise((resolve, reject) => {
+        https.get(url, (response) => {
+            response.pipe(file);
+            file.on('finish', () => {
+                file.close(resolve);
+            });
+        }).on('error', (err) => {
+            fs.unlink(dest, () => reject(err));
+        });
+    });
+}
+
+async function scrapePosters(browser, client) {
+    const start = performance.now();
+    try {
+        // Get all slugs from the films table
+        const { rows } = await client.query('SELECT slug FROM films ORDER BY film_id');
+        const slugs = rows.map(row => row.slug);
+        console.log(`Found ${slugs.length} films to scrape`);
+
+        // IGNORE BELOW CODE: for processing limited batch only
+        // const slugs = [
+        //     'a-climax-of-blue-power',
+        //     'a-womans-torment-1977',
+        //     'american-babylon',
+        //     'bacchanale-1970',
+        //     'bat-pussy',
+        //     'bijou',
+        //     'bottled-vulva-high-school-girl-yuriko',
+        //     'boys-in-the-sand',
+        //     'cafe-flesh',
+        //     'china-girl-1974',
+        //     'corporate-assets',
+        //     'drive-1974',
+        //     'el-satario',
+        //     'equation-to-an-unknown',
+        //     'eveready-harton-in-buried-treasure',
+        // ];
+
+        // Define the number of concurrent pages (batches of 10)
+        const concurrency = 10;
+
+        // Function to process a batch of slugs
+        const processBatch = async (batch) => {
+            const promises = batch.map(async (slug) => {
+                const page = await browser.newPage();
+                const URL = `https://letterboxd.com/film/${slug}/`;  // Film page URL
+
+                await safeGoto(page, URL);  // Using the safeGoto function, retries up to 3 times
+
+                // Extract the poster URL
+                const posterUrl = await page.evaluate(() => {
+                    const posterElement = document.querySelector('img[width="230"][height="345"]');
+                    return posterElement ? posterElement.src : null;
+                });
+
+                if (posterUrl) {
+                    const imagePath = path.resolve(`./images/posters/${slug}.jpg`);
+                    await downloadImage(posterUrl, imagePath);
+                    console.log(`Downloaded poster for ${slug} to ${imagePath}`);
+                } else {
+                    console.log(`Poster not found for ${slug}`);
+                }
+
+                await page.close();
+            });
+
+            // Wait for all promises in the batch to complete
+            await Promise.all(promises);
+        };
+
+        // Process the slugs in batches
+        for (let i = 0; i < slugs.length; i += concurrency) {
+            const batch = slugs.slice(i, i + concurrency);
+            await processBatch(batch);
+
+            // Add a small delay after each batch of 10 completes
+            console.log(`Processed ${i + batch.length} posters. Adding a delay...`);
+            const delay = Math.floor(Math.random() * 2000) + 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        const finish = performance.now();
+        console.log(`Scraping ${slugs.length} posters took ${((finish - start) / 1000).toFixed(2)} seconds`);
+    } catch (error) {
+        console.error('Error scraping posters:', error);
+        const finish = performance.now();
+        console.log(`Errored out after ${((finish - start) / 1000).toFixed(2)} seconds`);
+    }
+}
+
 async function main() {
     const start = performance.now();
+    const dbUser = process.env.DB_USER || process.env.DEV_DB_USER;
+    const dbPassword = process.env.DB_PASSWORD || process.env.DEV_DB_PASSWORD;
     const { Client } = pg;
     const client = new Client({
-        user: 'samah',
-        password: process.env.DEV_DB_PASSWORD,
+        user: dbUser,
+        password: dbPassword,
         host: 'localhost',
         database: 'mkdb',
-        port: process.env.PORT || 5432,
+        port: process.env.DB_PORT || 5432,
     });
     const browser = await puppeteer.launch({ headless: 'shell' });
     try {
@@ -305,6 +415,8 @@ async function main() {
 
         const finish = performance.now();
         console.log(`Film scraping for all users took ${((finish - start) / 1000).toFixed(2)} seconds`);
+
+        await scrapePosters(browser, client);
     } catch (error) {
         console.error(`Error in main(): ${error}`);
     } finally {
