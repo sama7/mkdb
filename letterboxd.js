@@ -360,6 +360,7 @@ async function main() {
         browser = await puppeteer.launch({
             headless: 'shell',
             executablePath: '/usr/bin/chromium-browser',
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
         })
     } else {
         browser = await puppeteer.launch({ headless: 'shell' });
