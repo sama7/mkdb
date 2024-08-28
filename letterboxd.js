@@ -227,9 +227,9 @@ async function scrapeFilms(browser, client, username) {
                 console.error(`Failed to insert or update rating for film '${permalink}' by user '${username}':`, err.stack);
             }
         }
-        // Add a random delay between 1 to 3 seconds before moving on to the next page of films
-        const delay = Math.floor(Math.random() * 2000) + 1000;
-        await new Promise(resolve => setTimeout(resolve, delay))
+        // // Add a random delay between 1 to 3 seconds before moving on to the next page of films
+        // const delay = Math.floor(Math.random() * 2000) + 1000;
+        // await new Promise(resolve => setTimeout(resolve, delay))
     }
     await page.close();
     console.log(`Total films for user '${username}': ${films.length}`);
