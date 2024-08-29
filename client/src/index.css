@@ -16,7 +16,8 @@
 
 a {
   /* font-weight: 500; */
-  /* color: #646cff; */ /* ngl i like this color...*/
+  /* color: #646cff; */
+  /* ngl i like this color...*/
   color: #f8f9fa;
   text-decoration: inherit;
 }
@@ -61,6 +62,13 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #242424;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #213547;
@@ -83,14 +91,19 @@ button:focus-visible {
 
 .film-card {
   background-color: #161616;
-  padding: 5px; /* reduce padding */
-  border-radius: 3px; /* reduce border-radius for a sharper look */
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1); /* reduce shadow */
-  width: 100px; /* adjust width to make the cards smaller */
+  padding: 5px;
+  /* reduce padding */
+  border-radius: 3px;
+  /* reduce border-radius for a sharper look */
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+  /* reduce shadow */
+  width: 100px;
+  /* adjust width to make the cards smaller */
 }
 
 .film-info {
-  margin-top: 5px; /* reduce margin */
+  margin-top: 5px;
+  /* reduce margin */
   text-align: center;
 }
 
