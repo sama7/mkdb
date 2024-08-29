@@ -12,6 +12,7 @@ const base_url = (process.env.NODE_ENV ? production : development);
 
 // Middleware
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "client", "dist")));
 app.use(cors({
     credentials: true,
     origin: base_url,
@@ -28,6 +29,12 @@ app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).send('Something broke!');
 });
+
+if (process.env.NODE_ENV === 'production') {
+    app.get("*", (req, res) => {
+        res.sendFile(path.join(__dirname, "client", "dist", "index.html"));
+    });
+}
 
 // Start server
 const PORT = process.env.PORT || 3000;
