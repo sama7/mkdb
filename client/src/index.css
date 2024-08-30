@@ -106,7 +106,7 @@ button:focus-visible {
   }
 
   .film-card {
-    width: 125px;
+    width: 150px;
     /* Let the grid control the width */
   }
 }
