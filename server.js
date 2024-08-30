@@ -6,7 +6,7 @@ import filmRoutes from './routes/filmRoutes.js';
 import cors from 'cors';
 
 const app = express();
-const production = 'https://www.mkdb.co';
+const production = 'https://mkdb.co';
 const development = 'http://localhost:5173';
 const base_url = (process.env.NODE_ENV ? production : development);
 

@@ -1,9 +1,9 @@
 export default function Header(props) {
-    const production = 'https://www.mkdb.co';
+    const production = 'https://mkdb.co';
     const development = 'http://localhost:5173';
 
     function HeaderLink(props) {
-        if (import.meta.env === 'production') {
+        if (import.meta.env.MODE === 'production') {
             return (
                 <h1>
                     <a href={production} className="header-link">
