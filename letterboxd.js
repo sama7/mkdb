@@ -29,27 +29,30 @@ async function scrapeUsernames(browser, client) {
             break; // Exit if no table is found
         }
 
-        // Get all usernames on the current page
-        const pageUsernames = await page.evaluate(() => {
+        // Get all usernames and avatar URLs on the current page
+        const pageUsernamesAndAvatars = await page.evaluate(() => {
             const rows = document.querySelectorAll('.person-table tr');
-            const names = [];
+            const users = [];
 
             rows.forEach(row => {
                 const avatarLink = row.querySelector('.avatar');
                 if (avatarLink) {
                     const href = avatarLink.getAttribute('href');
+                    const imgSrc = avatarLink.querySelector('img')?.getAttribute('src');
                     if (href) {
                         // Extract the username between the slashes in the href
                         const username = href.split('/')[1];
-                        names.push(username);
+                        users.push({ username, imgSrc });
                     }
                 }
             });
-            return names;
+            return users;
         });
 
         // Insert each username into the database if it doesn't already exist
-        for (const username of pageUsernames) {
+        for (const user of pageUsernamesAndAvatars) {
+            const { username, imgSrc } = user;
+
             try {
                 await client.query(
                     `INSERT INTO users (username, time_created, time_modified) 
@@ -57,15 +60,25 @@ async function scrapeUsernames(browser, client) {
                      ON CONFLICT (username) DO NOTHING`,
                     [username]
                 );
+
+                // Download the avatar image to server
+                if (imgSrc) {
+                    const dest = path.resolve(`./images/avatars/${username}.jpg`);
+                    await downloadImage(imgSrc, dest);
+                    console.log(`Downloaded avatar for ${username}`);
+                } else {
+                    console.log(`Avatar not found for ${username}`);
+                }
+
             } catch (err) {
                 console.error(`Failed to insert username ${username}:`, err.stack);
             }
         }
 
-        console.log(`Number of users found on Page ${pageNum}: ${pageUsernames.length}`);
+        console.log(`Number of users found on Page ${pageNum}: ${pageUsernamesAndAvatars.length}`);
 
         // Add the usernames from this page to the total list
-        usernames = usernames.concat(pageUsernames);
+        usernames = usernames.concat(pageUsernamesAndAvatars.map(user => user.username));
 
         // Check if there is a "Next" button to go to the next page
         const nextPageLink = await page.$('a.next');
@@ -82,12 +95,12 @@ async function scrapeUsernames(browser, client) {
         // Wait for the next page to load
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
     }
-    // await page.close();
-    console.log(`Total users found: ${usernames.length}`)
+
+    console.log(`Total users found: ${usernames.length}`);
     return usernames;
 }
 
-async function scrapeFilms(browser, client, username) {
+async function scrapeFilmRatings(browser, client, username) {
     const start = performance.now();
     const URL = `https://letterboxd.com/${username}/films/rated/.5-5/page/`;
 
@@ -214,11 +227,11 @@ async function scrapeFilms(browser, client, username) {
 
             // Insert or update rating in the database
             const ratingInsertQuery = `
-                INSERT INTO ratings (user_id, film_id, rating, time_created, time_modified)
+                INSERT INTO ratings_stg (user_id, film_id, rating, time_created, time_modified)
                 VALUES ((SELECT user_id FROM users WHERE username = $1), $2, $3, NOW(), NOW())
                 ON CONFLICT (user_id, film_id) DO UPDATE
                 SET rating = EXCLUDED.rating, time_modified = NOW()
-                WHERE ratings.rating <> EXCLUDED.rating;
+                WHERE ratings_stg.rating <> EXCLUDED.rating;
             `;
 
             try {
@@ -263,7 +276,7 @@ async function downloadImage(url, dest) {
     });
 }
 
-async function scrapePosters(browser, client) {
+async function scrapeFilmDetails(browser, client) {
     const start = performance.now();
     try {
         // Get all slugs from the films table
@@ -290,8 +303,8 @@ async function scrapePosters(browser, client) {
         //     'eveready-harton-in-buried-treasure',
         // ];
 
-        // Define the number of concurrent pages (batches of 10)
-        const concurrency = 10;
+        // Define the number of concurrent pages (batches of 30)
+        const concurrency = 30;
 
         // Function to process a batch of slugs
         const processBatch = async (batch) => {
@@ -301,18 +314,37 @@ async function scrapePosters(browser, client) {
 
                 await safeGoto(page, URL);  // Using the safeGoto function, retries up to 3 times
 
-                // Extract the poster URL
-                const posterUrl = await page.evaluate(() => {
+                // Extract the poster URL, TMDb URL, and synopsis
+                const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
                     const posterElement = document.querySelector('img[width="230"][height="345"]');
-                    return posterElement ? posterElement.src : null;
+                    const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
+                    const synopsisElement = document.querySelector('meta[name="description"]');
+
+                    return {
+                        posterUrl: posterElement ? posterElement.src : null,
+                        tmdbUrl: tmdbElement ? tmdbElement.href : null,
+                        synopsis: synopsisElement ? synopsisElement.content : null
+                    };
                 });
 
+                // Download poster image if it exists
                 if (posterUrl) {
                     const imagePath = path.resolve(`./images/posters/${slug}.jpg`);
                     await downloadImage(posterUrl, imagePath);
                     console.log(`Downloaded poster for ${slug} to ${imagePath}`);
                 } else {
                     console.log(`Poster not found for ${slug}`);
+                }
+
+                // Update the database with the TMDb URL and synopsis
+                try {
+                    await client.query(
+                        `UPDATE films SET tmdb = $1, synopsis = $2, time_modified = NOW() WHERE slug = $3`,
+                        [tmdbUrl, synopsis, slug]
+                    );
+                    console.log(`Updated film details for ${slug}`);
+                } catch (err) {
+                    console.error(`Failed to update details for ${slug}:`, err.stack);
                 }
 
                 await page.close();
@@ -327,7 +359,7 @@ async function scrapePosters(browser, client) {
             const batch = slugs.slice(i, i + concurrency);
             await processBatch(batch);
 
-            // Add a small delay after each batch of 10 completes
+            // Add a small delay after each batch of 30 completes
             console.log(`Processed ${i + batch.length} posters. Adding a delay...`);
             const delay = Math.floor(Math.random() * 2000) + 1000;
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -346,12 +378,13 @@ async function main() {
     const start = performance.now();
     const dbUser = process.env.DB_USER || process.env.DEV_DB_USER;
     const dbPassword = process.env.DB_PASSWORD || process.env.DEV_DB_PASSWORD;
-    const { Client } = pg;
-    const client = new Client({
+    const { Pool } = pg;
+    const client = new Pool({
         user: dbUser,
         password: dbPassword,
         host: 'localhost',
         database: 'mkdb',
+        max: 30,
         port: process.env.DB_PORT || 5432,
     });
     let browser;
@@ -394,39 +427,43 @@ async function main() {
         //     console.error('Error fetching usernames from the database:', err.stack);
         // }
 
-        // IGNORE BELOW CODE: for running concurrently in batches of 10 only
+        // IGNORE BELOW CODE: for running concurrently in batches of 10 only. 
+        // unless that's what you want to do 😳 then uncomment the below
 
-        // // Helper function to split an array into chunks
-        // function chunkArray(array, chunkSize) {
-        //     const chunks = [];
-        //     for (let i = 0; i < array.length; i += chunkSize) {
-        //         chunks.push(array.slice(i, i + chunkSize));
-        //     }
-        //     return chunks;
-        // }
-
-        // // Split the usernames array into chunks of 10
-        // const chunks = chunkArray(usernames, 10);
-        // console.log(`Splitting users into ${chunks.length} chunks, scraping films of no more than 10 users concurrently`);
-
-        // // Process each chunk sequentially
-        // for (const [i, chunk] of chunks.entries()) {
-        //     console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-        //     await Promise.all(chunk.map(username => scrapeFilms(browser, username)));
-        //     console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-        // }
-
-        for (const username of usernames) {
-            await scrapeFilms(browser, client, username);
-            // Add a random delay between 1 to 3 seconds
-            const delay = Math.floor(Math.random() * 2000) + 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
+        // Helper function to split an array into chunks
+        function chunkArray(array, chunkSize) {
+            const chunks = [];
+            for (let i = 0; i < array.length; i += chunkSize) {
+                chunks.push(array.slice(i, i + chunkSize));
+            }
+            return chunks;
         }
+
+        // Split the usernames array into chunks of 30
+        const chunks = chunkArray(usernames, 30);
+        console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 30 users concurrently`);
+
+        // Process each chunk sequentially
+        for (const [i, chunk] of chunks.entries()) {
+            console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
+            await Promise.all(chunk.map(username => scrapeFilmRatings(browser, username)));
+            console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
+        }
+
+        // IGNORE BELOW CODE: comment it out if you are scraping film ratings of 10 users concurrently!
+        // uncomment the below code if you are going one-by-one
+
+        // for (const username of usernames) {
+        //     await scrapeFilmRatings(browser, client, username);
+        //     // Add a random delay between 1 to 3 seconds
+        //     const delay = Math.floor(Math.random() * 2000) + 1000;
+        //     await new Promise(resolve => setTimeout(resolve, delay));
+        // }
 
         const finish = performance.now();
         console.log(`Film scraping for all users took ${((finish - start) / 1000).toFixed(2)} seconds`);
 
-        await scrapePosters(browser, client);
+        await scrapeFilmDetails(browser, client);
     } catch (error) {
         console.error(`Error in main(): ${error}`);
     } finally {
