@@ -446,7 +446,7 @@ async function main() {
         // Process each chunk sequentially
         for (const [i, chunk] of chunks.entries()) {
             console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-            await Promise.all(chunk.map(username => scrapeFilmRatings(browser, username)));
+            await Promise.all(chunk.map(username => scrapeFilmRatings(browser, client, username)));
             console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
         }
 
