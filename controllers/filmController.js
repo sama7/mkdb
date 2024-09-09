@@ -41,10 +41,12 @@ export const getFilmRankings = async (req, res) => {
                     films f
                 JOIN
                     ratings r ON f.film_id = r.film_id
+                WHERE f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
         `;
 
         const conditions = [];
 
+        // Add optional minYear and maxYear filters
         if (minYear) {
             conditions.push(`f.year >= $${paramIndex++}`);
             queryParams.push(minYear);
@@ -54,8 +56,9 @@ export const getFilmRankings = async (req, res) => {
             queryParams.push(maxYear);
         }
 
+        // Append any additional conditions for year if they exist
         if (conditions.length > 0) {
-            query += ` WHERE ${conditions.join(' AND ')} `;
+            query += ` AND ${conditions.join(' AND ')} `;
         }
 
         query += `

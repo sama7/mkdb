@@ -109,7 +109,7 @@ async function scrapeFilmRatings(browser, client, username) {
 
     await page.setViewport({ width: 393, height: 852 });
 
-    await page.goto(URL + 1);
+    await page.goto(URL + 1, { timeout: 60000 });
 
     // Check if the pagination element exists
     const paginationExists = await page.$('div.pagination ul');
@@ -130,7 +130,7 @@ async function scrapeFilmRatings(browser, client, username) {
     const films = []
 
     for (let i = 1; i <= totalPages; i++) {
-        await page.goto(URL + i, { waitUntil: 'networkidle0' });
+        await page.goto(URL + i, { waitUntil: 'networkidle0', timeout: 60000 });
 
         // Check if there are any films on the page
         const filmsExist = await page.$('ul.poster-list');
