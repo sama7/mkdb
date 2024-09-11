@@ -1,4 +1,4 @@
-import express from 'express';
+import * as express from 'express';
 import * as filmController from '../controllers/filmController.js';
 
 const router = express.Router();
