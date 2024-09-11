@@ -4,6 +4,7 @@ node_modules/
 films/
 logs/
 images/
+dumps/
 .env
 
 # Remaining: Client directories and files

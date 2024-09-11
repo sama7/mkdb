@@ -38,7 +38,7 @@ const FilmGrid = () => {
     const fetchFilms = async () => {
         try {
             // You will replace this with the actual fetch from your backend
-            const response = await fetch(`/api/films/rankings?page=${page}&filters=${JSON.stringify(filters)}`);
+            const response = await fetch(`/api/rankings?page=${page}&filters=${JSON.stringify(filters)}`);
             const rows = await response.json();
             setFilms(rows);
             console.log(`Query returned ${rows.length} rows.`);

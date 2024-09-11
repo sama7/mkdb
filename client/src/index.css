@@ -87,6 +87,61 @@ button:focus-visible {
   text-align: center;
 }
 
+.film-details {
+  text-align: left;
+  padding: 1rem;
+}
+
+.rank-up {
+  color: green;
+  font-weight: bold;
+}
+
+.rank-down {
+  color: red;
+  font-weight: bold;
+}
+
+.rank-section {
+  display: flex;
+  align-items: center;
+}
+
+.big-rank {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-right: 10px;
+}
+
+.rank-section img {
+  width: 40px;
+}
+
+.star-rating {
+  color: #08c434;
+}
+
+.user-avatar {
+  width: 40px;
+  border-radius: 50%;
+  margin-right: 10px; /* Add space between avatar and username */
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.user-list-item {
+  list-style: none; /* Remove bullet point */
+}
+
+.user-info {
+  display: flex;
+  align-items: center; /* Vertically align avatar and username */
+}
+
+.username {
+  vertical-align: middle;
+}
+
 .filters {
   margin-bottom: 20px;
 }
@@ -145,7 +200,7 @@ button:focus-visible {
   }
 }
 
-img {
+.film-poster {
   max-width: 100%;
   height: auto;
   display: block;

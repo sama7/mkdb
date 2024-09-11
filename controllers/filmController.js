@@ -103,3 +103,68 @@ export const getFilmRankings = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
+
+// Get film details and ratings
+export const getFilmDetails = async (req, res) => {
+    const { slug } = req.params;
+
+    try {
+        // Fetch film details
+        const filmQuery = `
+            SELECT
+                f.title,
+                f.year,
+                f.synopsis,
+                AVG(r.rating) AS average_rating,
+                COUNT(r.rating) AS rating_count,
+                (
+                    SELECT ranking
+                    FROM film_rankings_history frh
+                    WHERE 
+                        f.film_id = frh.film_id
+                        AND
+                        frh.week = (SELECT MAX(week) FROM film_rankings_history)
+                ) AS current_rank,
+                (
+                    SELECT ranking
+                    FROM film_rankings_history frh
+                    WHERE 
+                        f.film_id = frh.film_id
+                        AND
+                        frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)
+                ) AS previous_rank
+            FROM
+                films f
+            JOIN
+                ratings r ON f.film_id = r.film_id
+            WHERE f.slug = $1
+            GROUP BY
+                f.film_id, f.title, f.year, f.slug, f.synopsis 
+        `;
+        const filmResult = await pool.query(filmQuery, [slug]);
+        const film = filmResult.rows[0];
+
+        if (!film) {
+            return res.status(404).json({ error: 'Film not found' });
+        }
+
+        // Fetch user ratings
+        const ratingsQuery = `
+            SELECT u.username, r.rating
+            FROM ratings r
+            JOIN users u ON r.user_id = u.user_id
+            JOIN films f ON r.film_id = f.film_id
+            WHERE f.slug = $1
+            ORDER BY r.rating DESC
+        `;
+        const ratingsResult = await pool.query(ratingsQuery, [slug]);
+
+        res.json({
+            film,
+            ratings: ratingsResult.rows,
+        });
+    } catch (error) {
+        console.error('Error fetching film details:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};

@@ -22,7 +22,7 @@ app.use(cors({
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // Routes
-app.use('/api/films', filmRoutes);
+app.use('/api', filmRoutes);
 
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {
