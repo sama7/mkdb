@@ -37,7 +37,7 @@ const FilmDetails = () => {
     if (film.current_rank && !film.previous_rank) {
         rankIndicator = <img src="/images/icons/new_mank.png" alt="New entry in the MKDb Top 1000" title="New entry in the MKDb Top 1000" />;
     } else if (!film.current_rank && film.previous_rank) {
-        rankIndicator = <img src="/images/icons/former_mank.png" alt="Newly departed from MKDb Top 1000" title="Newly departed from MKDb Top 1000" />;
+        rankIndicator = <img src="/images/icons/former_mank.png" alt="Newly departed from the MKDb Top 1000" title="Newly departed from the MKDb Top 1000" />;
     }
 
     // Function to convert rating to stars with symbols
