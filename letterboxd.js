@@ -285,7 +285,7 @@ async function scrapeFilmDetails(browser, client) {
         // Get all slugs from the films table
         const { rows } = await client.query('SELECT slug FROM films ORDER BY film_id');
         const slugs = rows.map(row => row.slug);
-        console.log(`Found ${slugs.length} films to scrape`);
+        console.log(`Found ${slugs.length} films to scrape for details`);
 
         // IGNORE BELOW CODE: for processing limited batch only
         // const slugs = [
@@ -363,16 +363,16 @@ async function scrapeFilmDetails(browser, client) {
             await processBatch(batch);
 
             // Add a small delay after each batch of 30 completes
-            console.log(`Processed ${i + batch.length} posters. Adding a delay...`);
+            console.log(`Processed ${i + batch.length} film details. Adding a delay...`);
             const delay = Math.floor(Math.random() * 2000) + 1000;
             await new Promise(resolve => setTimeout(resolve, delay));
         }
 
         const finish = performance.now();
         const timeToScrape = (finish - start) / 1000;
-        console.log(`Scraping ${slugs.length} films took ${timeToScrape.toFixed(2)} seconds`);
+        console.log(`Scraping ${slugs.length} film details took ${timeToScrape.toFixed(2)} seconds`);
     } catch (error) {
-        console.error('Error scraping posters:', error);
+        console.error('Error scraping film details:', error);
         const finish = performance.now();
         console.log(`Errored out after ${((finish - start) / 1000).toFixed(2)} seconds`);
     }
