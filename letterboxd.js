@@ -130,6 +130,7 @@ async function scrapeFilmRatings(browser, client, username) {
     const films = []
 
     for (let i = 1; i <= totalPages; i++) {
+        console.log(`Starting Page ${i} for user '${username}'`);
         await page.goto(URL + i, { waitUntil: 'networkidle0', timeout: 60000 });
 
         // Check if there are any films on the page
@@ -209,7 +210,7 @@ async function scrapeFilmRatings(browser, client, username) {
                 const result = await client.query(filmInsertQuery, [title, year, permalink]);
                 filmId = result.rows.length > 0 ? result.rows[0].film_id : null;
             } catch (err) {
-                console.error(`Failed to insert film '${permalink}':`, err.stack);
+                console.error(`Failed to insert film '${permalink}' for user '${username}':`, err.stack);
                 continue;
             }
 
@@ -237,27 +238,29 @@ async function scrapeFilmRatings(browser, client, username) {
             try {
                 await client.query(ratingInsertQuery, [username, filmId, rating]);
             } catch (err) {
-                console.error(`Failed to insert or update rating for film '${permalink}' by user '${username}':`, err.stack);
+                console.error(`Failed to insert or update rating of film '${permalink}' for user '${username}':`, err.stack);
             }
         }
+        console.log(`Finished Page ${i} for user '${username}'`);
         // // Add a random delay between 1 to 3 seconds before moving on to the next page of films
-        // const delay = Math.floor(Math.random() * 2000) + 1000;
-        // await new Promise(resolve => setTimeout(resolve, delay))
+        const delay = Math.floor(Math.random() * 2000) + 1000;
+        await new Promise(resolve => setTimeout(resolve, delay))
     }
     await page.close();
-    console.log(`Total films for user '${username}': ${films.length}`);
     const finish = performance.now();
-    console.log(`Film scraping for user '${username}' took ${((finish - start) / 1000).toFixed(2)} seconds`);
+    const timeToScrape = (finish - start) / 1000; // in seconds
+    const scrapingSpeed = films.length / timeToScrape;
+    console.log(`Scraping ${films.length} films for user '${username}' took ${timeToScrape.toFixed(2)} seconds: ${scrapingSpeed.toFixed(2)} films/second`);
 }
 
 async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 60000 }) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 6; attempt++) {
         try {
             await page.goto(url, options);
             return; // Successfully loaded the page
         } catch (err) {
             console.warn(`Attempt ${attempt} failed for ${url}: ${err.message}`);
-            if (attempt === 3) throw err; // Re-throw after 3 attempts
+            if (attempt === 6) throw err; // Re-throw after 6 attempts
         }
     }
 }
@@ -312,7 +315,7 @@ async function scrapeFilmDetails(browser, client) {
                 const page = await browser.newPage();
                 const URL = `https://letterboxd.com/film/${slug}/`;  // Film page URL
 
-                await safeGoto(page, URL);  // Using the safeGoto function, retries up to 3 times
+                await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
 
                 // Extract the poster URL, TMDb URL, and synopsis
                 const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
@@ -366,7 +369,8 @@ async function scrapeFilmDetails(browser, client) {
         }
 
         const finish = performance.now();
-        console.log(`Scraping ${slugs.length} posters took ${((finish - start) / 1000).toFixed(2)} seconds`);
+        const timeToScrape = (finish - start) / 1000;
+        console.log(`Scraping ${slugs.length} films took ${timeToScrape.toFixed(2)} seconds`);
     } catch (error) {
         console.error('Error scraping posters:', error);
         const finish = performance.now();
@@ -439,9 +443,9 @@ async function main() {
             return chunks;
         }
 
-        // Split the usernames array into chunks of 30
-        const chunks = chunkArray(usernames, 30);
-        console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 30 users concurrently`);
+        // Split the usernames array into chunks of 10
+        const chunks = chunkArray(usernames, 10);
+        console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 10 users concurrently`);
 
         // Process each chunk sequentially
         for (const [i, chunk] of chunks.entries()) {
