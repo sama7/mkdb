@@ -374,7 +374,8 @@ async function scrapeFilmDetails(browser, client) {
     } catch (error) {
         console.error('Error scraping film details:', error);
         const finish = performance.now();
-        console.log(`Errored out after ${((finish - start) / 1000).toFixed(2)} seconds`);
+        const timeToScrape = (finish - start) / 1000;
+        console.log(`Errored out after ${timeToScrape.toFixed(2)} seconds`);
     }
 }
 
@@ -434,40 +435,42 @@ async function main() {
         // IGNORE BELOW CODE: for running concurrently in batches of 10 only. 
         // unless that's what you want to do 😳 then uncomment the below
 
-        // Helper function to split an array into chunks
-        function chunkArray(array, chunkSize) {
-            const chunks = [];
-            for (let i = 0; i < array.length; i += chunkSize) {
-                chunks.push(array.slice(i, i + chunkSize));
-            }
-            return chunks;
-        }
+        // // Helper function to split an array into chunks
+        // function chunkArray(array, chunkSize) {
+        //     const chunks = [];
+        //     for (let i = 0; i < array.length; i += chunkSize) {
+        //         chunks.push(array.slice(i, i + chunkSize));
+        //     }
+        //     return chunks;
+        // }
 
-        // Split the usernames array into chunks of 10
-        const chunks = chunkArray(usernames, 10);
-        console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 10 users concurrently`);
+        // // Split the usernames array into chunks of 10
+        // const chunks = chunkArray(usernames, 10);
+        // console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 10 users concurrently`);
 
-        // Process each chunk sequentially
-        for (const [i, chunk] of chunks.entries()) {
-            console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-            await Promise.all(chunk.map(username => scrapeFilmRatings(browser, client, username)));
-            console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-        }
+        // // Process each chunk sequentially
+        // for (const [i, chunk] of chunks.entries()) {
+        //     console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
+        //     await Promise.all(chunk.map(username => scrapeFilmRatings(browser, client, username)));
+        //     console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
+        // }
 
         // IGNORE BELOW CODE: comment it out if you are scraping film ratings of 10 users concurrently!
         // uncomment the below code if you are going one-by-one
 
-        // for (const username of usernames) {
-        //     await scrapeFilmRatings(browser, client, username);
-        //     // Add a random delay between 1 to 3 seconds
-        //     const delay = Math.floor(Math.random() * 2000) + 1000;
-        //     await new Promise(resolve => setTimeout(resolve, delay));
-        // }
+        for (const username of usernames) {
+            await scrapeFilmRatings(browser, client, username);
+            // Add a random delay between 1 to 3 seconds
+            const delay = Math.floor(Math.random() * 2000) + 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
 
         const finish = performance.now();
-        console.log(`Film scraping for all users took ${((finish - start) / 1000).toFixed(2)} seconds`);
+        const timeToScrape = (finish - start) / 1000;
+        console.log(`Scraping of film ratings for all users took ${timeToScrape.toFixed(2)} seconds`);
 
         await scrapeFilmDetails(browser, client);
+        return;
     } catch (error) {
         console.error(`Error in main(): ${error}`);
     } finally {
