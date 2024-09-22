@@ -241,7 +241,7 @@ async function scrapeFilmRatings(browser, client, username) {
                 console.error(`Failed to insert or update rating of film '${permalink}' for user '${username}':`, err.stack);
             }
         }
-        console.log(`Finished Page ${i} of ${i} for user '${username}'`);
+        console.log(`Finished Page ${i} of ${totalPages} for user '${username}'`);
         // // Add a random delay between 1 to 3 seconds before moving on to the next page of films
         const delay = Math.floor(Math.random() * 2000) + 1000;
         await new Promise(resolve => setTimeout(resolve, delay))
