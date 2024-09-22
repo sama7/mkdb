@@ -55,7 +55,7 @@ async function scrapeUsernames(browser, client) {
 
             try {
                 await client.query(
-                    `INSERT INTO users (username, time_created, time_modified) 
+                    `INSERT INTO users_stg (username, time_created, time_modified) 
                      VALUES ($1, NOW(), NOW()) 
                      ON CONFLICT (username) DO NOTHING`,
                     [username]
@@ -229,7 +229,7 @@ async function scrapeFilmRatings(browser, client, username) {
             // Insert or update rating in the database
             const ratingInsertQuery = `
                 INSERT INTO ratings_stg (user_id, film_id, rating, time_created, time_modified)
-                VALUES ((SELECT user_id FROM users WHERE username = $1), $2, $3, NOW(), NOW())
+                VALUES ((SELECT user_id FROM users_stg WHERE username = $1), $2, $3, NOW(), NOW())
                 ON CONFLICT (user_id, film_id) DO UPDATE
                 SET rating = EXCLUDED.rating, time_modified = NOW()
                 WHERE ratings_stg.rating <> EXCLUDED.rating;
