@@ -130,7 +130,7 @@ async function scrapeFilmRatings(browser, client, username) {
     const films = []
 
     for (let i = 1; i <= totalPages; i++) {
-        console.log(`Starting Page ${i} for user '${username}'`);
+        console.log(`Starting Page ${i} of ${totalPages} for user '${username}'`);
         await page.goto(URL + i, { waitUntil: 'networkidle0', timeout: 60000 });
 
         // Check if there are any films on the page
@@ -241,7 +241,7 @@ async function scrapeFilmRatings(browser, client, username) {
                 console.error(`Failed to insert or update rating of film '${permalink}' for user '${username}':`, err.stack);
             }
         }
-        console.log(`Finished Page ${i} for user '${username}'`);
+        console.log(`Finished Page ${i} of ${i} for user '${username}'`);
         // // Add a random delay between 1 to 3 seconds before moving on to the next page of films
         const delay = Math.floor(Math.random() * 2000) + 1000;
         await new Promise(resolve => setTimeout(resolve, delay))
@@ -363,7 +363,7 @@ async function scrapeFilmDetails(browser, client) {
             await processBatch(batch);
 
             // Add a small delay after each batch of 30 completes
-            console.log(`Processed ${i + batch.length} film details. Adding a delay...`);
+            console.log(`Processed ${i + batch.length} of ${slugs.length} film details. Adding a delay...`);
             const delay = Math.floor(Math.random() * 2000) + 1000;
             await new Promise(resolve => setTimeout(resolve, delay));
         }
