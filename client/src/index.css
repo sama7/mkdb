@@ -28,7 +28,7 @@ a {
 body {
   margin: 0;
   display: flex;
-  place-items: center;
+  /* place-items: center; */
   min-width: 320px;
   min-height: 100vh;
   color: rgba(255, 255, 255, 0.87);
@@ -85,6 +85,11 @@ button:focus-visible {
   margin-top: 5px;
   /* reduce margin */
   text-align: center;
+}
+
+.film-not-found img {
+  width: 30px;
+  margin-left: 5px;
 }
 
 .film-details {

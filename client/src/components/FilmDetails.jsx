@@ -6,20 +6,50 @@ const FilmDetails = () => {
     const { slug } = useParams();
     const [film, setFilm] = useState(null);
     const [ratings, setRatings] = useState([]);
+    const [isLoading, setLoading] = useState(true); // New state for loading
+    const [isNotFound, setNotFound] = useState(false); // New state for 404
 
     useEffect(() => {
         // Fetch film details from the backend
         const fetchFilmDetails = async () => {
-            const response = await fetch(`/api/film/${slug}`);
-            const data = await response.json();
-            setFilm(data.film);
-            setRatings(data.ratings);
+            try {
+                const response = await fetch(`/api/film/${slug}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.film) {
+                        setFilm(data.film);
+                        setRatings(data.ratings);
+                    } else {
+                        setNotFound(true); // Film not found
+                    }
+                } else {
+                    setNotFound(true); // Handle non-200 responses as a "not found"
+                }
+            } catch (error) {
+                setNotFound(true); // In case of an error, treat it as not found
+            } finally {
+                setLoading(false); // Stop loading when response is received
+            }
         };
 
         fetchFilmDetails();
     }, [slug]);
 
-    if (!film) return <div>Loading...</div>;
+    if (isLoading) {
+        return <div>Loading...</div>;
+    }
+
+    if (isNotFound) {
+        return (
+            <div className='film-not-found'>
+                <Header />
+                <p>
+                    Sorry, ‘{slug}’ wasn’t found in our database. Either it’s not a valid film or none of us have rated it yet.
+                    <img src="/images/icons/cat_thinking.png" alt="Cat thinking..." title="Cat thinking..." />
+                </p>
+            </div>
+        );
+    }
 
     // Determine the rank change
     let rankChange = null;
