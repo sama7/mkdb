@@ -87,7 +87,7 @@ const FilmDetails = () => {
                 <a href={`https://letterboxd.com/film/${slug}`} target="_blank" rel="noopener noreferrer">
                     <img className='film-poster' src={`/images/posters/${slug}.jpg`} alt={`${film.title} (${film.year})`} title={`${film.title} (${film.year})`} />
                 </a>
-                <p><strong>Synopsis:</strong> {film.synopsis}</p>
+                <p>{film.synopsis}</p>
                 {/* MKDb Rank */}
                 <div className="rank-section">
 
