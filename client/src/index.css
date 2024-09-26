@@ -90,6 +90,7 @@ button:focus-visible {
 .film-not-found img {
   width: 30px;
   margin-left: 5px;
+  vertical-align: middle;
 }
 
 .film-details {
