@@ -41,13 +41,15 @@ const FilmDetails = () => {
 
     if (isNotFound) {
         return (
-            <div className='film-not-found'>
+            <>
                 <Header />
-                <p>
-                    Sorry, ‘{slug}’ wasn’t found in our database. Either it’s not a valid film or none of us have rated it yet.
-                    <img src="/images/icons/cat_thinking.png" alt="Cat thinking..." title="Cat thinking..." />
-                </p>
-            </div>
+                <div className='film-not-found film-details'>
+                    <p>
+                        Sorry, ‘{slug}’ wasn’t found in our database. Either it’s not a valid film or none of us have rated it yet.
+                        <img src="/images/icons/cat_thinking.png" alt="Cat thinking..." title="Cat thinking..." />
+                    </p>
+                </div>
+            </>
         );
     }
 
