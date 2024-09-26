@@ -118,7 +118,7 @@ const FilmDetails = () => {
                                                 className="user-avatar"
                                             />
                                             <span className="username">
-                                                <a href={`https://letterboxd.com/${userRating.username}`} target="_blank" rel="noopener noreferrer">
+                                                <a href={`https://letterboxd.com/${userRating.username}/film/${slug}/activity/`} target="_blank" rel="noopener noreferrer">
                                                     {userRating.username}
                                                 </a>
                                             </span>
