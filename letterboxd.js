@@ -147,7 +147,7 @@ async function scrapeFilmRatings(browser, client, username) {
         const filmElements = await page.$$('.poster-container');
 
         // Helper function to wait for a non-null attribute with a retry mechanism
-        const waitForAttribute = async (element, attribute, maxRetries = 60) => {
+        const waitForAttribute = async (element, attribute, maxRetries = 10) => {
             const slug = await element.evaluate((el, attr) => el.getAttribute(attr), 'data-film-slug')
             let value = null;
             let attempt = 0;
@@ -339,13 +339,45 @@ async function scrapeFilmDetails(browser, client) {
                     console.log(`Poster not found for ${slug}`);
                 }
 
-                // Update the database with the TMDb URL and synopsis
+                // Now scrape the genres from the /genres/ page
+                const genresURL = `https://letterboxd.com/film/${slug}/genres/`;
+                let genres = [];
+                try {
+                    await safeGoto(page, genresURL);
+
+                    // Extract genres from the page
+                    genres = await page.evaluate(() => {
+                        const genreHeader = Array.from(document.querySelectorAll('h3'))
+                            .find(h3 => /Genre(s)?/.test(h3.textContent));  // Find the h3 containing "Genre" or "Genres"
+
+                        if (!genreHeader) return [];  // No genres found
+
+                        const genreDiv = genreHeader.nextElementSibling;  // The div immediately following the genre header
+                        if (!genreDiv) return [];
+
+                        const genreLinks = Array.from(genreDiv.querySelectorAll('p a'));  // Get the <a> links inside <p> tags
+                        const genres = genreLinks.map(a => a.textContent.trim());
+
+                        return genres;
+                    });
+
+                    if (genres.length === 0) {
+                        genres = null; // No genres found, set it to null
+                        console.log(`No genres found for ${slug}`);
+                    } else {
+                        console.log(`Found genres for ${slug}: ${genres.join(', ')}`);
+                    }
+                } catch (err) {
+                    console.error(`Failed to fetch genres for ${slug}:`, err.message);
+                }
+
+                // Update the database with the TMDb URL, synopsis, and genres
                 try {
                     await client.query(
-                        `UPDATE films SET tmdb = $1, synopsis = $2, time_modified = NOW() WHERE slug = $3`,
-                        [tmdbUrl, synopsis, slug]
+                        `UPDATE films SET tmdb = $1, synopsis = $2, genres = $3, time_modified = NOW() WHERE slug = $4`,
+                        [tmdbUrl, synopsis, genres, slug]
                     );
-                    console.log(`Updated film details for ${slug}`);
+                    console.log(`Updated film details and genres for ${slug}`);
                 } catch (err) {
                     console.error(`Failed to update details for ${slug}:`, err.stack);
                 }
@@ -412,59 +444,60 @@ async function main() {
 
         // IGNORE BELOW CODE; for getting a specific range of usernames only
         // particularly if program times out..
-
-        // // Define the SQL query
-        // const query = `
-        //     SELECT username
-        //     FROM users
-        //     WHERE user_id >= $1
-        //     ORDER BY user_id ASC;
-        // `;
-
-        // // Execute the query and store the results in the usernames array
-        // let usernames = [];
-
-        // try {
-        //     const result = await client.query(query, [203]); // 203 is the starting user_id
-        //     usernames = result.rows.map(row => row.username); // Extract the usernames from the result set
-        //     console.log(`Fetched ${usernames.length} usernames with user_id >= 203`);
-        // } catch (err) {
-        //     console.error('Error fetching usernames from the database:', err.stack);
-        // }
+        /*
+                // Define the SQL query
+                const query = `
+                    SELECT username
+                    FROM users_stg
+                    WHERE user_id = $1
+                    ORDER BY user_id ASC;
+                `;
+        
+                // Execute the query and store the results in the usernames array
+                let usernames = [];
+        
+                try {
+                    const result = await client.query(query, [1612]); // 203 is the starting user_id
+                    usernames = result.rows.map(row => row.username); // Extract the usernames from the result set
+                    console.log(`Fetched ${usernames.length} usernames with user_id = 1612`);
+                } catch (err) {
+                    console.error('Error fetching usernames from the database:', err.stack);
+                }
+        */
 
         // IGNORE BELOW CODE: for running concurrently in batches of 10 only. 
         // unless that's what you want to do 😳 then uncomment the below
 
-        // // Helper function to split an array into chunks
-        // function chunkArray(array, chunkSize) {
-        //     const chunks = [];
-        //     for (let i = 0; i < array.length; i += chunkSize) {
-        //         chunks.push(array.slice(i, i + chunkSize));
-        //     }
-        //     return chunks;
-        // }
+        // Helper function to split an array into chunks
+        function chunkArray(array, chunkSize) {
+            const chunks = [];
+            for (let i = 0; i < array.length; i += chunkSize) {
+                chunks.push(array.slice(i, i + chunkSize));
+            }
+            return chunks;
+        }
 
-        // // Split the usernames array into chunks of 10
-        // const chunks = chunkArray(usernames, 10);
-        // console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 10 users concurrently`);
+        // Split the usernames array into chunks of 10
+        const chunks = chunkArray(usernames, 10);
+        console.log(`Splitting users into ${chunks.length} chunks, scraping film ratings of no more than 10 users concurrently`);
 
-        // // Process each chunk sequentially
-        // for (const [i, chunk] of chunks.entries()) {
-        //     console.log(`=== STARTING CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-        //     await Promise.all(chunk.map(username => scrapeFilmRatings(browser, client, username)));
-        //     console.log(`=== FINISHED CHUNK ${i + 1} WITH ${chunk.length} USERNAMES ===`);
-        // }
+        // Process each chunk sequentially
+        for (const [i, chunk] of chunks.entries()) {
+            console.log(`=== STARTING CHUNK ${i + 1} OF ${chunks.length} WITH ${chunk.length} USERNAMES ===`);
+            await Promise.all(chunk.map(username => scrapeFilmRatings(browser, client, username)));
+            console.log(`=== FINISHED CHUNK ${i + 1} OF ${chunks.length} WITH ${chunk.length} USERNAMES ===`);
+        }
 
         // IGNORE BELOW CODE: comment it out if you are scraping film ratings of 10 users concurrently!
         // uncomment the below code if you are going one-by-one
-
-        for (const username of usernames) {
-            await scrapeFilmRatings(browser, client, username);
-            // Add a random delay between 1 to 3 seconds
-            const delay = Math.floor(Math.random() * 2000) + 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
-
+        /*
+                for (const username of usernames) {
+                    await scrapeFilmRatings(browser, client, username);
+                    // Add a random delay between 1 to 3 seconds
+                    const delay = Math.floor(Math.random() * 2000) + 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+        */
         const finish = performance.now();
         const timeToScrape = (finish - start) / 1000;
         console.log(`Scraping of film ratings for all users took ${timeToScrape.toFixed(2)} seconds`);
