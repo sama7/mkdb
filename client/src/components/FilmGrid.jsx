@@ -11,6 +11,7 @@ const FilmGrid = () => {
         maxYear: undefined,
         minRatings: undefined,
         maxRatings: undefined,
+        genres: undefined,
     });
     const [page, setPage] = useState(1);
     const filmsPerPage = 100;

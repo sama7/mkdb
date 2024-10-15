@@ -13,7 +13,8 @@ export const getFilmRankings = async (req, res) => {
             maxYear,
             minRatings = 10,  // Default value
             maxRatings,
-            limit = 100       // same as filmsPerPage
+            limit = 100,       // same as filmsPerPage
+            genres = {}
         } = { ...filters, ...req.query };
 
         const offset = (page - 1) * limit;  // for pagination
@@ -27,6 +28,7 @@ export const getFilmRankings = async (req, res) => {
                 title,
                 year,
                 slug,
+                genres,
                 average_rating,
                 rating_count
             FROM (
@@ -34,6 +36,7 @@ export const getFilmRankings = async (req, res) => {
                     f.title,
                     f.year,
                     f.slug,
+                    f.genres,
                     AVG(r.rating) AS average_rating,
                     COUNT(r.rating) AS rating_count,
                     COUNT(*) OVER() AS total_count
@@ -56,6 +59,30 @@ export const getFilmRankings = async (req, res) => {
             queryParams.push(maxYear);
         }
 
+        // Handle genres filter: include or exclude genres
+        const includeGenres = [];
+        const excludeGenres = [];
+
+        Object.keys(genres).forEach((genre) => {
+            if (genres[genre] === 'include') {
+                includeGenres.push(genre);
+            } else if (genres[genre] === 'exclude') {
+                excludeGenres.push(genre);
+            }
+        });
+
+        // Add conditions for included genres - film must include *all* genres in the list
+        if (includeGenres.length > 0) {
+            conditions.push(`f.genres @> $${paramIndex++}::text[]`);
+            queryParams.push(includeGenres);
+        }
+
+        // Add conditions for excluded genres - exclude films that have any of the listed genres
+        if (excludeGenres.length > 0) {
+            conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
+            queryParams.push(excludeGenres);
+        }
+
         // Append any additional conditions for year if they exist
         if (conditions.length > 0) {
             query += ` AND ${conditions.join(' AND ')} `;
@@ -63,7 +90,7 @@ export const getFilmRankings = async (req, res) => {
 
         query += `
                 GROUP BY
-                    f.title, f.year, f.slug
+                    f.title, f.year, f.slug, f.genres
         `;
 
         const havingConditions = [];
