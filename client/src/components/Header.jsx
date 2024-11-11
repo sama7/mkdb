@@ -22,8 +22,23 @@ export default function Header(props) {
         );
     }
 
+    function PuffinBirthdayBanner() {
+        return (
+            <div className="puffin-birthday-banner">
+                <h2>
+                    <img src="/images/icons/catroll.gif" alt="Pixelated cat rolling GIF" title=":catroll:" />
+                    Happy birthday, 
+                    <img className="puffin-avatar" src="/images/avatars/obligatory.jpg" alt="Puffin's avatar" title="Puffin's avatar" /> 
+                    Puffin!
+                    <img src="/images/icons/catroll.gif" alt="Pixelated cat rolling GIF" title=":catroll:" />
+                </h2>
+            </div>
+        );
+    }
+
     return (
         <header>
+            <PuffinBirthdayBanner />
             <HeaderLink />
         </header>
     );

@@ -93,6 +93,30 @@ button:focus-visible {
   vertical-align: middle;
 }
 
+/* .puffin-birthday-banner {
+  background-color: #6d6d6d;
+} */
+
+.puffin-birthday-banner img:first-child {
+  width: 30px;
+  margin-right: 7.5px;
+  vertical-align: middle;
+}
+
+.puffin-birthday-banner img:last-child {
+  width: 30px;
+  margin-left: 7.5px;
+  vertical-align: middle;
+}
+
+.puffin-avatar {
+  border-radius: 50%;
+  width: 40px;
+  margin-left: 7.5px;
+  margin-right: 7.5px;
+  vertical-align: middle;
+}
+
 .film-details {
   text-align: left;
   padding: 1rem;
