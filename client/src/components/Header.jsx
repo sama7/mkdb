@@ -38,7 +38,7 @@ export default function Header(props) {
 
     return (
         <header>
-            <PuffinBirthdayBanner />
+            {/* <PuffinBirthdayBanner /> */}
             <HeaderLink />
         </header>
     );
