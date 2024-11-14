@@ -210,7 +210,7 @@ ul.genre-dropdown {
 
 .genre-item.include {
   content: ' ✔️';
-  color: green;
+  color: #08c434;
 }
 
 .genre-item.exclude {
