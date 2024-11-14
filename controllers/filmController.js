@@ -90,7 +90,7 @@ export const getFilmRankings = async (req, res) => {
 
         query += `
                 GROUP BY
-                    f.title, f.year, f.slug, f.genres
+                    f.film_id, f.title, f.year, f.slug, f.genres
         `;
 
         const havingConditions = [];
