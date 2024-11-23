@@ -15,9 +15,9 @@ const Pagination = ({ currentPage, totalPages, onPageChange }) => {
     };
 
     return (
-        <div className="pagination">
+        <div className="pagination-section">
             <button onClick={handlePrev} disabled={currentPage === 1}>
-                Previous
+                Back
             </button>
             <span>
                 Page 

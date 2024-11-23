@@ -131,6 +131,144 @@ export const getFilmRankings = async (req, res) => {
     }
 };
 
+// Function to get greatest risers' rankings
+export const getFilmRisersRankings = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                frh.title,
+                frh.year,
+                frh.slug,
+                frh.current_rank,
+                frh.previous_rank,
+                (frh.previous_rank - frh.current_rank) AS rank_change
+            FROM (
+                SELECT
+                    f.film_id,
+                    f.title,
+                    f.year,
+                    f.slug,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                FROM films f
+            ) AS frh
+            WHERE frh.previous_rank IS NOT NULL
+                AND frh.current_rank IS NOT NULL
+                AND frh.previous_rank > frh.current_rank
+            ORDER BY rank_change DESC
+            LIMIT 100
+        `;
+
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (error) {
+        console.error("Error fetching film risers' rankings:", error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get greatest fallers' rankings
+export const getFilmFallersRankings = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                frh.title,
+                frh.year,
+                frh.slug,
+                frh.current_rank,
+                frh.previous_rank,
+                (frh.previous_rank - frh.current_rank) AS rank_change
+            FROM (
+                SELECT
+                    f.film_id,
+                    f.title,
+                    f.year,
+                    f.slug,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                FROM films f
+            ) AS frh
+            WHERE frh.previous_rank IS NOT NULL
+                AND frh.current_rank IS NOT NULL
+                AND frh.previous_rank < frh.current_rank
+            ORDER BY rank_change ASC
+            LIMIT 100;  -- Adjust limit as needed
+        `;
+
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (error) {
+        console.error("Error fetching film fallers' rankings:", error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get new entries' rankings
+export const getFilmNewEntriesRankings = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                frh.title,
+                frh.year,
+                frh.slug,
+                frh.current_rank
+            FROM (
+                SELECT
+                    f.film_id,
+                    f.title,
+                    f.year,
+                    f.slug,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                FROM films f
+            ) AS frh
+            WHERE frh.previous_rank IS NULL
+                AND frh.current_rank IS NOT NULL
+            ORDER BY frh.current_rank ASC
+            LIMIT 100;  -- Adjust limit as needed
+        `;
+
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (error) {
+        console.error("Error fetching film new entries' rankings:", error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get new departures' rankings
+export const getFilmNewDeparturesRankings = async (req, res) => {
+    try {
+        const query = `
+            SELECT
+                frh.title,
+                frh.year,
+                frh.slug,
+                frh.previous_rank
+            FROM (
+                SELECT
+                    f.film_id,
+                    f.title,
+                    f.year,
+                    f.slug,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                FROM films f
+            ) AS frh
+            WHERE frh.previous_rank IS NOT NULL
+                AND frh.current_rank IS NULL
+            ORDER BY frh.previous_rank ASC
+            LIMIT 100;  -- Adjust limit as needed
+        `;
+
+        const { rows } = await pool.query(query);
+        res.json(rows);
+    } catch (error) {
+        console.error("Error fetching film new departures' rankings:", error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
 // Get film details and ratings
 export const getFilmDetails = async (req, res) => {
     const { slug } = req.params;

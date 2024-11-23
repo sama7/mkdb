@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import Header from './Header'; // Header component
 import FilmCard from './FilmCard'; // A component to display each film's poster
 import Filters from './Filters'; // A component to handle filtering options
 import Pagination from './Pagination'; // A component to handle pagination of films
@@ -21,7 +20,7 @@ const FilmGrid = () => {
     useEffect(() => {
         const handleResize = () => {
             const width = window.innerWidth;
-            if (width <= 1024) {
+            if (width <= 991) {
                 setColumns(4);
             } else {
                 setColumns(5);
@@ -38,7 +37,6 @@ const FilmGrid = () => {
 
     const fetchFilms = async () => {
         try {
-            // You will replace this with the actual fetch from your backend
             const response = await fetch(`/api/rankings?page=${page}&filters=${JSON.stringify(filters)}`);
             const rows = await response.json();
             setFilms(rows);
@@ -71,10 +69,9 @@ const FilmGrid = () => {
 
     return (
         <div>
-            <Header />
-            <h2>Top Ranked Films</h2>
+            <h3 className="my-3">Top Ranked Films</h3>
             <Filters filters={filters} onFiltersChange={handleFiltersChange} />
-            <div className="film-grid" style={{
+            <div className="film-grid container" style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
                 gap: '5px'  /* reduce gap between items */

@@ -9,5 +9,16 @@ router.get('/rankings', filmController.getFilmRankings);
 // GET /api/film/:slug - Retrieve synopsis and ratings details for an individual film
 router.get('/film/:slug', filmController.getFilmDetails);
 
+// GET /api/risers - Retrieve film risers' rankings
+router.get('/risers', filmController.getFilmRisersRankings);
+
+// GET /api/fallers - Retrieve film fallers' rankings
+router.get('/fallers', filmController.getFilmFallersRankings);
+
+// GET /api/new-entries - Retrieve film new entries' rankings
+router.get('/new-entries', filmController.getFilmNewEntriesRankings);
+
+// GET /api/new-departures - Retrieve film new departures' rankings
+router.get('/new-departures', filmController.getFilmNewDeparturesRankings);
 
 export default router;
