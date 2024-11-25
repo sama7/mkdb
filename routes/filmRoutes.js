@@ -3,7 +3,7 @@ import * as filmController from '../controllers/filmController.js';
 
 const router = express.Router();
 
-// GET /api/rankings - Retrieve film rankings with optional filters
+// GET /api/rankings - Retrieve top film rankings with optional filters
 router.get('/rankings', filmController.getFilmRankings);
 
 // GET /api/film/:slug - Retrieve synopsis and ratings details for an individual film
@@ -20,5 +20,8 @@ router.get('/new-entries', filmController.getFilmNewEntriesRankings);
 
 // GET /api/new-departures - Retrieve film new departures' rankings
 router.get('/new-departures', filmController.getFilmNewDeparturesRankings);
+
+// GET /api/evil-mank - Retrieve top film rankings with optional filters
+router.get('/evil-mank', filmController.getEvilMankFilmRankings);
 
 export default router;
