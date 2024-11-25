@@ -68,7 +68,7 @@ const FilmGridEvilMank = () => {
     };
 
     return (
-        <div>
+        <div className="mb-4">
             <h3 className="my-3">Bottom Ranked Films</h3>
             <Filters filters={filters} onFiltersChange={handleFiltersChange} />
             <div className="film-grid container" style={{

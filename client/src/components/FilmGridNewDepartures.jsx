@@ -37,7 +37,7 @@ const FilmGridNewDepartures = (props) => {
     };
 
     return (
-        <div className="film-grid container mt-2 mb-3" style={{
+        <div className="film-grid container mt-2 mb-4" style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
             gap: '5px'  /* reduce gap between items */

@@ -344,3 +344,7 @@ div.tab-pane div.container h3 img {
   width: 40px;
   margin-left: 0.2em;
 }
+
+.masterlist a {
+  font-weight: bold;
+}
