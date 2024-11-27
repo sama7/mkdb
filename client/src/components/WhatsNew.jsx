@@ -20,19 +20,19 @@ export default function WhatsNew() {
             fill
         >
             <Tab eventKey="greatest-risers" title="Risers">
-                <div className="container">
+                <div className="container mb-5">
                     <h3>Greatest Risers in Rank</h3>
                     <FilmGridRisers id={key} />
                 </div>
             </Tab>
             <Tab eventKey="greatest-fallers" title="Fallers">
-                <div className="container">
+                <div className="container mb-5">
                     <h3>Greatest Fallers in Rank</h3>
                     <FilmGridFallers id={key} />
                 </div>
             </Tab>
             <Tab eventKey="new-entries" title="Entries">
-                <div className="container">
+                <div className="container mb-5">
                     <h3>
                         Just Entered the Top 1000
                         <img src="/images/icons/new_mank.png" alt="New entry in the MKDb Top 1000" title="New entry in the MKDb Top 1000" />
@@ -41,7 +41,7 @@ export default function WhatsNew() {
                 </div>
             </Tab>
             <Tab eventKey="new-departures" title="Departures">
-                <div className="container">
+                <div className="container mb-5">
                     <h3>
                         Just Left the Top 1000
                         <img src="/images/icons/former_mank.png" alt="Newly departed from the MKDb Top 1000" title="Newly departed from the MKDb Top 1000" />
