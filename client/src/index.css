@@ -336,12 +336,12 @@ ul.genre-dropdown {
   padding-right: 0px;
 }
 
-div.tab-pane div.container h3 {
+div.tab-pane div h3 {
   display: inline-flex;
   align-items: center;
 }
 
-div.tab-pane div.container h3 img {
+div.tab-pane div h3 img {
   width: 40px;
   margin-left: 0.2em;
 }
