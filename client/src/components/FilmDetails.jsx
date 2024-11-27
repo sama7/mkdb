@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import Spinner from 'react-bootstrap/Spinner';
 
 const FilmDetails = () => {
     const { slug } = useParams();
@@ -35,7 +36,11 @@ const FilmDetails = () => {
     }, [slug]);
 
     if (isLoading) {
-        return <div>Loading...</div>;
+        return (
+            <Spinner data-bs-theme="dark" animation="border" role="status" className="mt-4">
+                <span className="visually-hidden">Loading...</span>
+            </Spinner>
+        );
     }
 
     if (isNotFound) {

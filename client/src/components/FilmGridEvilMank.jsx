@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import FilmCard from './FilmCard'; // A component to display each film's poster
 import Filters from './Filters'; // A component to handle filtering options
 import Pagination from './Pagination'; // A component to handle pagination of films
+import Spinner from 'react-bootstrap/Spinner';
 
 const FilmGridEvilMank = () => {
     const [films, setFilms] = useState([]);
@@ -16,6 +17,7 @@ const FilmGridEvilMank = () => {
     const filmsPerPage = 100;
     const [totalPages, setTotalPages] = useState(10);
     const [columns, setColumns] = useState(5);
+    const [isLoading, setLoading] = useState(true);
 
     useEffect(() => {
         const handleResize = () => {
@@ -55,6 +57,8 @@ const FilmGridEvilMank = () => {
             }
         } catch (error) {
             console.error('Error fetching film rankings:', error);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -66,6 +70,19 @@ const FilmGridEvilMank = () => {
     const handlePageChange = (newPage) => {
         setPage(newPage);
     };
+
+    if (isLoading) {
+        return (
+            <div className="mb-4">
+                <h3 className="my-3">Bottom Ranked Films</h3>
+                <Filters filters={filters} onFiltersChange={handleFiltersChange} />
+                <Spinner data-bs-theme="dark" animation="border" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                </Spinner>
+                <Pagination currentPage={page} totalPages={totalPages} onPageChange={handlePageChange} />
+            </div>
+        );
+    }
 
     return (
         <div className="mb-4">

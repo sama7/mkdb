@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import FilmCardRisers from './FilmCardRisers'; // A component to display each film's poster
+import Spinner from 'react-bootstrap/Spinner';
 
 const FilmGridRisers = (props) => {
     const [films, setFilms] = useState([]);
     const [columns, setColumns] = useState(5);
+    const [isLoading, setLoading] = useState(true);
 
     useEffect(() => {
         const handleResize = () => {
@@ -33,8 +35,20 @@ const FilmGridRisers = (props) => {
             console.log(`Query returned ${rows.length} rows.`);
         } catch (error) {
             console.error("Error fetching film risers' rankings:", error);
+        } finally {
+            setLoading(false);
         }
     };
+
+    if (isLoading) {
+        return (
+            <div>
+                <Spinner data-bs-theme="dark" animation="border" role="status" className="mt-3">
+                    <span className="visually-hidden">Loading...</span>
+                </Spinner>
+            </div>
+        );
+    }
 
     return (
         <div className="film-grid container mt-2 mb-4" style={{
