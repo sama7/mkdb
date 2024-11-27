@@ -131,103 +131,104 @@ async function scrapeFilmRatings(browser, client, username) {
 
     for (let i = 1; i <= totalPages; i++) {
         console.log(`Starting Page ${i} of ${totalPages} for user '${username}'`);
-        await page.goto(URL + i, { waitUntil: 'networkidle0', timeout: 60000 });
+        try {
+            await safeGoto(page, URL + i); // Using the safeGoto function, retries up to 6 times
 
-        // Check if there are any films on the page
-        const filmsExist = await page.$('ul.poster-list');
+            // Check if there are any films on the page
+            const filmsExist = await page.$('ul.poster-list');
 
-        if (!filmsExist) {
-            break;
-        }
+            if (!filmsExist) {
+                break;
+            }
 
-        await page.waitForSelector('.film-poster[data-film-name]');
-        await page.waitForSelector('.film-poster[data-film-release-year]');
+            await page.waitForSelector('.film-poster[data-film-name]');
+            await page.waitForSelector('.film-poster[data-film-release-year]');
 
-        // Get the total number of films on the page
-        const filmElements = await page.$$('.poster-container');
+            // Get the total number of films on the page
+            const filmElements = await page.$$('.poster-container');
 
-        // Helper function to wait for a non-null attribute with a retry mechanism
-        const waitForAttribute = async (element, attribute, maxRetries = 10) => {
-            const slug = await element.evaluate((el, attr) => el.getAttribute(attr), 'data-film-slug')
-            let value = null;
-            let attempt = 0;
+            // Helper function to wait for a non-null attribute with a retry mechanism
+            const waitForAttribute = async (element, attribute, maxRetries = 5) => {
+                const slug = await element.evaluate((el, attr) => el.getAttribute(attr), 'data-film-slug')
+                let value = null;
+                let attempt = 0;
 
-            while (value === null && attempt < maxRetries) {
-                value = await element.evaluate((el, attr) => el.getAttribute(attr), attribute);
-                if (value === null) {
-                    attempt++;
-                    const delay = attempt * 500; // Increase delay with each retry (500ms, 1000ms, 1500ms, etc.)
-                    console.log(`Attempt ${attempt}: ${attribute} not found for user '${username}' -> film '${slug}', retrying in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
+                while (value === null && attempt < maxRetries) {
+                    value = await element.evaluate((el, attr) => el.getAttribute(attr), attribute);
+                    if (value === null) {
+                        attempt++;
+                        const delay = attempt * 500; // Increase delay with each retry (500ms, 1000ms, 1500ms, etc.)
+                        console.log(`Attempt ${attempt}: ${attribute} not found for user '${username}' -> film '${slug}', retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
                 }
-            }
 
-            if (value === null) {
-                console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug}' after ${maxRetries} attempts`);
-            }
-            return value;
-        };
+                if (value === null) {
+                    console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug}' after ${maxRetries} attempts`);
+                }
+                return value;
+            };
 
-        // Iterate over each film and extract the required data
-        for (const filmElement of filmElements) {
-            const titleElement = await filmElement.$('.film-poster');
+            // Iterate over each film and extract the required data
+            for (const filmElement of filmElements) {
+                const titleElement = await filmElement.$('.film-poster');
 
-            // Wait for non-null values
-            const title = await waitForAttribute(titleElement, 'data-film-name');
-            let year = await waitForAttribute(titleElement, 'data-film-release-year');
-            const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
+                // Wait for non-null values
+                const title = await waitForAttribute(titleElement, 'data-film-name');
+                let year = await waitForAttribute(titleElement, 'data-film-release-year');
+                const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
 
-            if (year === "") {
-                year = null; // Replace empty string with null, as database only accepts integers or null
-            }
+                if (year === "") {
+                    year = null; // Replace empty string with null, as database only accepts integers or null
+                }
 
-            // Wait for the "rated-x" class to appear within the "poster-viewingdata" element
-            const ratingClass = await filmElement.$eval('.poster-viewingdata span[class*="rated-"]', el => {
-                // Extract the class that matches "rated-x"
-                const ratingClass = Array.from(el.classList).find(cls => cls.startsWith('rated-'));
-                return ratingClass || null;
-            });
+                // Wait for the "rated-x" class to appear within the "poster-viewingdata" element
+                const ratingClass = await filmElement.$eval('.poster-viewingdata span[class*="rated-"]', el => {
+                    // Extract the class that matches "rated-x"
+                    const ratingClass = Array.from(el.classList).find(cls => cls.startsWith('rated-'));
+                    return ratingClass || null;
+                });
 
-            let rating = 0;
-            if (ratingClass) {
-                const ratingValue = parseInt(ratingClass.split('-')[1], 10);
-                rating = ratingValue / 2; // Convert to actual rating (e.g., 10 -> 5.0)
-            }
+                let rating = 0;
+                if (ratingClass) {
+                    const ratingValue = parseInt(ratingClass.split('-')[1], 10);
+                    rating = ratingValue / 2; // Convert to actual rating (e.g., 10 -> 5.0)
+                }
 
-            // Push the extracted data into the films array ()
-            films.push({ title, year, rating, permalink });
+                // Push the extracted data into the films array ()
+                films.push({ title, year, rating, permalink });
 
-            // Insert or update film in the database
-            const filmInsertQuery = `
+                // Insert or update film in the database
+                const filmInsertQuery = `
                 INSERT INTO films (title, year, slug, time_created, time_modified)
                 VALUES ($1, $2, $3, NOW(), NOW())
                 ON CONFLICT (slug) DO NOTHING
                 RETURNING film_id;
             `;
-            let filmId;
+                let filmId;
 
-            try {
-                const result = await client.query(filmInsertQuery, [title, year, permalink]);
-                filmId = result.rows.length > 0 ? result.rows[0].film_id : null;
-            } catch (err) {
-                console.error(`Failed to insert film '${permalink}' for user '${username}':`, err.stack);
-                continue;
-            }
-
-            if (!filmId) {
-                // If the film already exists, get its film_id
-                const getFilmIdQuery = `SELECT film_id FROM films WHERE slug = $1`;
                 try {
-                    const result = await client.query(getFilmIdQuery, [permalink]);
-                    filmId = result.rows[0].film_id;
+                    const result = await client.query(filmInsertQuery, [title, year, permalink]);
+                    filmId = result.rows.length > 0 ? result.rows[0].film_id : null;
                 } catch (err) {
-                    console.error(`Failed to retrieve film_id for film '${permalink}':`, err.stack);
+                    console.error(`Failed to insert film '${permalink}' for user '${username}':`, err.stack);
                     continue;
                 }
-            }
 
-            // Insert or update rating in the database
-            const ratingInsertQuery = `
+                if (!filmId) {
+                    // If the film already exists, get its film_id
+                    const getFilmIdQuery = `SELECT film_id FROM films WHERE slug = $1`;
+                    try {
+                        const result = await client.query(getFilmIdQuery, [permalink]);
+                        filmId = result.rows[0].film_id;
+                    } catch (err) {
+                        console.error(`Failed to retrieve film_id for film '${permalink}':`, err.stack);
+                        continue;
+                    }
+                }
+
+                // Insert or update rating in the database
+                const ratingInsertQuery = `
                 INSERT INTO ratings_stg (user_id, film_id, rating, time_created, time_modified)
                 VALUES ((SELECT user_id FROM users_stg WHERE username = $1), $2, $3, NOW(), NOW())
                 ON CONFLICT (user_id, film_id) DO UPDATE
@@ -235,11 +236,14 @@ async function scrapeFilmRatings(browser, client, username) {
                 WHERE ratings_stg.rating <> EXCLUDED.rating;
             `;
 
-            try {
-                await client.query(ratingInsertQuery, [username, filmId, rating]);
-            } catch (err) {
-                console.error(`Failed to insert or update rating of film '${permalink}' for user '${username}':`, err.stack);
+                try {
+                    await client.query(ratingInsertQuery, [username, filmId, rating]);
+                } catch (err) {
+                    console.error(`Failed to insert or update rating of film '${permalink}' for user '${username}':`, err.stack);
+                }
             }
+        } catch (err) {
+            console.error(`Failed to load Page ${i} of ${totalPages} for user '${username}':`, err.message);
         }
         console.log(`Finished Page ${i} of ${totalPages} for user '${username}'`);
         // // Add a random delay between 1 to 3 seconds before moving on to the next page of films
@@ -288,23 +292,12 @@ async function scrapeFilmDetails(browser, client) {
         console.log(`Found ${slugs.length} films to scrape for details`);
 
         // IGNORE BELOW CODE: for processing limited batch only
-        // const slugs = [
-        //     'a-climax-of-blue-power',
-        //     'a-womans-torment-1977',
-        //     'american-babylon',
-        //     'bacchanale-1970',
-        //     'bat-pussy',
-        //     'bijou',
-        //     'bottled-vulva-high-school-girl-yuriko',
-        //     'boys-in-the-sand',
-        //     'cafe-flesh',
-        //     'china-girl-1974',
-        //     'corporate-assets',
-        //     'drive-1974',
-        //     'el-satario',
-        //     'equation-to-an-unknown',
-        //     'eveready-harton-in-buried-treasure',
-        // ];
+        /*
+        const slugs = [
+            'harakiri',
+            'seven-samurai',
+        ];
+        */
 
         // Define the number of concurrent pages (batches of 30)
         const concurrency = 30;
@@ -315,30 +308,33 @@ async function scrapeFilmDetails(browser, client) {
                 const page = await browser.newPage();
                 const URL = `https://letterboxd.com/film/${slug}/`;  // Film page URL
 
-                await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
+                try {
+                    await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
 
-                // Extract the poster URL, TMDb URL, and synopsis
-                const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
-                    const posterElement = document.querySelector('img[width="230"][height="345"]');
-                    const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
-                    const synopsisElement = document.querySelector('meta[name="description"]');
+                    // Extract the poster URL, TMDb URL, and synopsis
+                    const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
+                        const posterElement = document.querySelector('img[width="230"][height="345"]');
+                        const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
+                        const synopsisElement = document.querySelector('meta[name="description"]');
 
-                    return {
-                        posterUrl: posterElement ? posterElement.src : null,
-                        tmdbUrl: tmdbElement ? tmdbElement.href : null,
-                        synopsis: synopsisElement ? synopsisElement.content : null
-                    };
-                });
+                        return {
+                            posterUrl: posterElement ? posterElement.src : null,
+                            tmdbUrl: tmdbElement ? tmdbElement.href : null,
+                            synopsis: synopsisElement ? synopsisElement.content : null
+                        };
+                    });
 
-                // Download poster image if it exists
-                if (posterUrl) {
-                    const imagePath = path.resolve(`./images/posters/${slug}.jpg`);
-                    await downloadImage(posterUrl, imagePath);
-                    console.log(`Downloaded poster for ${slug} to ${imagePath}`);
-                } else {
-                    console.log(`Poster not found for ${slug}`);
+                    // Download poster image if it exists
+                    if (posterUrl) {
+                        const imagePath = path.resolve(`./images/posters/${slug}.jpg`);
+                        await downloadImage(posterUrl, imagePath);
+                        console.log(`Downloaded poster for ${slug} to ${imagePath}`);
+                    } else {
+                        console.log(`Poster not found for ${slug}`);
+                    }
+                } catch (err) {
+                    console.error(`Failed to fetch poster for ${slug}:`, err.message);
                 }
-
                 // Now scrape the genres from the /genres/ page
                 const genresURL = `https://letterboxd.com/film/${slug}/genres/`;
                 let genres = [];
@@ -360,13 +356,6 @@ async function scrapeFilmDetails(browser, client) {
 
                         return genres;
                     });
-
-                    if (genres.length === 0) {
-                        genres = null; // No genres found, set it to null
-                        console.log(`No genres found for ${slug}`);
-                    } else {
-                        console.log(`Found genres for ${slug}: ${genres.join(', ')}`);
-                    }
                 } catch (err) {
                     console.error(`Failed to fetch genres for ${slug}:`, err.message);
                 }
