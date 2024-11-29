@@ -79,7 +79,6 @@ const FilmGrid = () => {
                 <Spinner data-bs-theme="dark" animation="border" role="status">
                     <span className="visually-hidden">Loading...</span>
                 </Spinner>
-                <Pagination currentPage={page} totalPages={totalPages} onPageChange={handlePageChange} />
             </div>
         );
     }
