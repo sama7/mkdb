@@ -503,7 +503,7 @@ export const getMembers = async (req, res) => {
                     num_films_watched
                 FROM
                     users
-                ORDER BY display_name ASC
+                ORDER BY UPPER(display_name) ASC
                 LIMIT $1 OFFSET $2
             `;
         }
