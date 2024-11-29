@@ -10,6 +10,7 @@ function NavigationBar() {
           <Nav className="me-auto text-start">
             <Nav.Link href="/">Home</Nav.Link>
             <Nav.Link href="/new">What’s New?</Nav.Link>
+            <Nav.Link href="/members">Members</Nav.Link>
             <Nav.Link href="/masterlist">Masterlist</Nav.Link>
           </Nav>
         </Navbar.Collapse>

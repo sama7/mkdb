@@ -120,7 +120,7 @@ const FilmDetails = () => {
                                         />
                                         <span className="username">
                                             <a href={`https://letterboxd.com/${userRating.username}/film/${slug}/activity/`} target="_blank" rel="noopener noreferrer">
-                                                {userRating.username}
+                                                {userRating.display_name}
                                             </a>
                                         </span>
                                     </div>

@@ -446,7 +446,7 @@ export const getFilmDetails = async (req, res) => {
 
         // Fetch user ratings
         const ratingsQuery = `
-            SELECT u.username, r.rating
+            SELECT u.username, u.display_name, r.rating
             FROM ratings r
             JOIN users u ON r.user_id = u.user_id
             JOIN films f ON r.film_id = f.film_id
@@ -461,6 +461,61 @@ export const getFilmDetails = async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching film details:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get all community members with pagination
+export const getMembers = async (req, res) => {
+    try {
+        // Extract page
+        const {
+            page = 1,
+            limit = 25,       // same as membersPerPage
+            sort = 'Watched',
+        } = { ...req.query };
+
+        const offset = (page - 1) * limit;  // for pagination
+
+        let query = `
+            SELECT
+                COUNT(*) OVER() AS total_count,
+                user_id,
+                username,
+                display_name,
+                num_films_watched
+            FROM
+                users
+            ORDER BY num_films_watched DESC
+            LIMIT $1 OFFSET $2
+        `;
+
+        // if sort is 'Watched', just use the above query
+        // if sort is 'Name', reassign query to use the below
+        // this is because you can't parameterize the ORDER BY value
+        if (sort === 'Name') {
+            query = `
+                SELECT
+                    COUNT(*) OVER() AS total_count,
+                    user_id,
+                    username,
+                    display_name,
+                    num_films_watched
+                FROM
+                    users
+                ORDER BY display_name ASC
+                LIMIT $1 OFFSET $2
+            `;
+        }
+
+        const { rows } = await pool.query(query, [limit, offset]);
+        console.log(`Query returned ${rows.length} rows.`);
+        if (rows.length > 0) {
+            console.log(`total_count: ${rows[0].total_count}`);
+        }
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching members:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };

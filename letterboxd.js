@@ -14,7 +14,6 @@ async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
 
     const page = (await browser.pages())[0];
-    await page.setViewport({ width: 393, height: 852 });
     await page.goto(followingListURL);
 
     let usernames = [];
@@ -31,45 +30,57 @@ async function scrapeUsernames(browser, client) {
 
         // Get all usernames and avatar URLs on the current page
         const pageUsernamesAndAvatars = await page.evaluate(() => {
-            const rows = document.querySelectorAll('.person-table tr');
+            const rows = document.querySelectorAll('.person-table tbody tr');
             const users = [];
 
             rows.forEach(row => {
+                const user = {};
                 const avatarLink = row.querySelector('.avatar');
                 if (avatarLink) {
                     const href = avatarLink.getAttribute('href');
-                    const imgSrc = avatarLink.querySelector('img')?.getAttribute('src');
+                    const avatarSrc = avatarLink.querySelector('img')?.getAttribute('src');
                     if (href) {
                         // Extract the username between the slashes in the href
                         const username = href.split('/')[1];
-                        users.push({ username, imgSrc });
+                        user.username = username;
+                        user.avatarSrc = avatarSrc;
                     }
                 }
+                const nameLink = row.querySelector('h3.title-3 a.name');
+                if (nameLink) {
+                    const displayName = nameLink.textContent.trim();
+                    user.displayName = displayName;
+                }
+                const numFilmsWatchedLink = row.querySelector('a.icon-watched');
+                if (numFilmsWatchedLink) {
+                    const numFilmsWatched = parseInt(numFilmsWatchedLink.textContent.trim().replace(/,/g, ''));
+                    user.numFilmsWatched = numFilmsWatched;
+                }
+                users.push(user);
             });
             return users;
         });
 
         // Insert each username into the database if it doesn't already exist
         for (const user of pageUsernamesAndAvatars) {
-            const { username, imgSrc } = user;
+            const { username, avatarSrc, displayName, numFilmsWatched } = user;
 
             try {
                 await client.query(
-                    `INSERT INTO users_stg (username, time_created, time_modified) 
-                     VALUES ($1, NOW(), NOW()) 
-                     ON CONFLICT (username) DO NOTHING`,
-                    [username]
+                    `INSERT INTO users_stg (username, display_name, num_films_watched, time_created, time_modified) 
+                     VALUES ($1, $2, $3, NOW(), NOW()) 
+                     ON CONFLICT (username) DO UPDATE
+                     SET display_name = EXCLUDED.display_name, num_films_watched = EXCLUDED.num_films_watched, time_modified = NOW()`,
+                    [username, displayName, numFilmsWatched]
                 );
 
                 // Download the avatar image to server
-                if (imgSrc) {
+                if (avatarSrc) {
                     const dest = path.resolve(`./images/avatars/${username}.jpg`);
-                    await downloadImage(imgSrc, dest);
-                    console.log(`Downloaded avatar for ${username}`);
+                    await downloadImage(avatarSrc, dest);
                 } else {
                     console.log(`Avatar not found for ${username}`);
                 }
-
             } catch (err) {
                 console.error(`Failed to insert username ${username}:`, err.stack);
             }
@@ -272,14 +283,28 @@ async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeou
 async function downloadImage(url, dest) {
     const file = fs.createWriteStream(dest);
     return new Promise((resolve, reject) => {
-        https.get(url, (response) => {
-            response.pipe(file);
-            file.on('finish', () => {
-                file.close(resolve);
+        function fetchUrl(currentUrl) {
+            https.get(currentUrl, (response) => {
+                // Check if the response is a redirect (status codes 301, 302, etc.)
+                if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+                    const redirectUrl = response.headers.location;
+                    if (redirectUrl) {
+                        console.log(`Redirecting to ${redirectUrl}`);
+                        fetchUrl(redirectUrl); // Follow the redirect
+                        return;
+                    }
+                }
+                // If the response is not a redirect, pipe the response to the file
+                response.pipe(file);
+                file.on('finish', () => {
+                    file.close(resolve);
+                });
+            }).on('error', (err) => {
+                fs.unlink(dest, () => reject(err)); // Delete the incomplete file on error
             });
-        }).on('error', (err) => {
-            fs.unlink(dest, () => reject(err));
-        });
+        }
+        // Start fetching the initial URL
+        fetchUrl(url);
     });
 }
 
