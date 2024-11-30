@@ -1,28 +1,27 @@
 import { Link } from "react-router-dom";
 
-export default function MembersRows(props) {
+export default function MemberNeighborsRows(props) {
 
-    const members = props.members?.map((member, index) => {
+    const neighbors = props.neighbors?.map((neighbor, index) => {
         return (
             <tr key={index}>
                 <td className="align-middle">
                     <div className="user-info">
                         <img
-                            src={`/images/avatars/${member.username}.jpg`}
-                            alt={`Avatar of user: ${member.username}`}
+                            src={`/images/avatars/${neighbor.neighbor_username}.jpg`}
+                            alt={`Avatar of user: ${neighbor.username}`}
                             className="user-avatar"
                         />
                         <span className="username">
-                            <Link to={`/members/${member.username}`}>
-                                {member.display_name}
+                            <Link to={`/members/${neighbor.neighbor_username}`}>
+                                {neighbor.neighbor_display_name}
                             </Link>
                         </span>
                     </div>
                 </td>
-                <td className="align-middle icon-watched">
+                <td className="align-middle">
                     <div className="watched-cell">
-                        <span className="icon"></span>
-                        {member.num_films_watched.toLocaleString()}
+                        {Number(neighbor.similarity_score).toFixed(2)}
                     </div>
                 </td>
             </tr>
@@ -30,7 +29,7 @@ export default function MembersRows(props) {
     });
     return (
         <tbody>
-            {members}
+            {neighbors}
         </tbody>
     );
 }

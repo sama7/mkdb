@@ -8,6 +8,7 @@ import WhatsNew from './components/WhatsNew';
 import FilmGridEvilMank from './components/FilmGridEvilMank';
 import Masterlist from './components/Masterlist';
 import Members from './components/Members';
+import MemberDetails from './components/MemberDetails';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/film/:slug" element={<FilmDetails />} />
             <Route path="/new" element={<WhatsNew />} />
             <Route path="/members" element={<Members />} />
+            <Route path="/members/:username" element={<MemberDetails />} />
             <Route path="/masterlist" element={<Masterlist />} />
             <Route path="/evil-mank" element={<FilmGridEvilMank />} />
           </Routes>

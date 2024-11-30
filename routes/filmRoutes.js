@@ -24,6 +24,12 @@ router.get('/new-departures', filmController.getFilmNewDeparturesRankings);
 // GET /api/members - Retrieve community members with pagination
 router.get('/members', filmController.getMembers);
 
+// GET /api/members/:username - Retrieve a specific community member's details
+router.get('/members/:username', filmController.getMemberDetails);
+
+// GET /api/member/:username - Retrieve a specific community member's details
+router.get('/member/:username', filmController.getMemberNeighbors);
+
 // GET /api/evil-mank - Retrieve top film rankings with optional filters
 router.get('/evil-mank', filmController.getEvilMankFilmRankings);
 

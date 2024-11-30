@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import Spinner from 'react-bootstrap/Spinner';
+import { Link } from 'react-router-dom';
 
 const FilmDetails = () => {
     const { slug } = useParams();
@@ -119,8 +120,11 @@ const FilmDetails = () => {
                                             className="user-avatar"
                                         />
                                         <span className="username">
-                                            <a href={`https://letterboxd.com/${userRating.username}/film/${slug}/activity/`} target="_blank" rel="noopener noreferrer">
+                                            <Link to={`/members/${userRating.username}`}>
                                                 {userRating.display_name}
+                                            </Link>
+                                            <a href={`https://letterboxd.com/${userRating.username}/film/${slug}/activity/`} target="_blank" rel="noopener noreferrer" className="activity-link ms-2">
+                                                (activity)
                                             </a>
                                         </span>
                                     </div>

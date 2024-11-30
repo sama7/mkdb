@@ -14,6 +14,7 @@ async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
 
     const page = (await browser.pages())[0];
+    const tempPage = await browser.newPage(); // keeping extra temp page for getting large avatar
     await page.goto(followingListURL);
 
     let usernames = [];
@@ -81,6 +82,19 @@ async function scrapeUsernames(browser, client) {
                 } else {
                     console.log(`Avatar not found for ${username}`);
                 }
+
+                // Download large avatar image to server
+                let avatarLargeSrc;
+                await tempPage.goto(`https://letterboxd.com/${username}`);
+                avatarLargeSrc = await tempPage.evaluate(() => {
+                    return document.querySelector('div.profile-avatar img')?.getAttribute('src');
+                });
+                if (avatarLargeSrc) {
+                    const dest = path.resolve(`./images/avatars/${username}-large.jpg`);
+                    await downloadImage(avatarLargeSrc, dest);
+                } else {
+                    console.log(`Large avatar not found for ${username}`);
+                }
             } catch (err) {
                 console.error(`Failed to insert username ${username}:`, err.stack);
             }
@@ -106,7 +120,8 @@ async function scrapeUsernames(browser, client) {
         // Wait for the next page to load
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
     }
-
+    page.close();
+    tempPage.close();
     console.log(`Total users found: ${usernames.length}`);
     return usernames;
 }

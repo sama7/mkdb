@@ -519,3 +519,185 @@ export const getMembers = async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
+
+// Function to get a specific community member's details
+export const getMemberDetails = async (req, res) => {
+    try {
+        const { username } = req.params;
+
+        let query = `
+            SELECT
+                user_id,
+                username,
+                display_name,
+                num_films_watched
+            FROM
+                users
+            WHERE
+                username = $1
+        `;
+
+        const memberResult = await pool.query(query, [username]);
+        const member = memberResult.rows[0];
+
+        if (!member) {
+            return res.status(404).json({ error: 'Member not found' });
+        }
+
+        res.json(member);
+    } catch (error) {
+        console.error('Error fetching member details:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get all community neighbors of a given member with pagination
+export const getMemberNeighbors = async (req, res) => {
+    try {
+        const { username } = req.params;
+
+        // Extract page
+        const {
+            page = 1,
+            limit = 25,       // same as membersPerPage
+            sort = 'Similarity Score',
+        } = { ...req.query };
+
+        const offset = (page - 1) * limit;  // for pagination
+
+        let query = `
+            WITH normalized_ratings AS (
+                SELECT
+                    user_id,
+                    film_id,
+                    rating - AVG(rating) OVER (PARTITION BY user_id) AS normalized_rating
+                FROM
+                    ratings
+            ),
+            user_similarity AS (
+                SELECT
+                    r1.user_id AS user_a,
+                    r2.user_id AS user_b,
+                    COUNT(*) AS overlap_count,
+                    SUM(r1.normalized_rating * r2.normalized_rating) /
+                    NULLIF(
+                        (SQRT(SUM(POWER(r1.normalized_rating, 2))) * SQRT(SUM(POWER(r2.normalized_rating, 2)))),
+                        0
+                    ) AS raw_similarity_score
+                FROM
+                    normalized_ratings r1
+                JOIN
+                    normalized_ratings r2 ON r1.film_id = r2.film_id
+                WHERE
+                    r1.user_id != r2.user_id
+                GROUP BY
+                    r1.user_id, r2.user_id
+            ),
+            confidence_weighted_similarity AS (
+                SELECT
+                    user_a,
+                    user_b,
+                    raw_similarity_score,
+                    overlap_count,
+                    raw_similarity_score * (overlap_count / (overlap_count + 5.0)) AS adjusted_similarity_score
+                FROM
+                    user_similarity
+                WHERE
+                    raw_similarity_score IS NOT NULL -- Exclude cases where similarity could not be calculated
+            )
+            SELECT
+                COUNT(*) OVER() AS total_count,
+                ua.username AS user_a,
+                ub.username AS neighbor_username,
+                ub.display_name AS neighbor_display_name,
+                cws.adjusted_similarity_score AS similarity_score,
+                cws.overlap_count
+            FROM
+                confidence_weighted_similarity cws
+            JOIN
+                users ua ON cws.user_a = ua.user_id
+            JOIN
+                users ub ON cws.user_b = ub.user_id
+            WHERE
+                ua.username = $1
+            ORDER BY
+                cws.adjusted_similarity_score DESC
+            LIMIT $2 OFFSET $3;
+        `;
+
+        // if sort is 'Similarity Score', just use the above query
+        // if sort is 'Name', reassign query to use the below
+        // this is because you can't parameterize the ORDER BY value
+        if (sort === 'Name') {
+            query = `
+                WITH normalized_ratings AS (
+                    SELECT
+                        user_id,
+                        film_id,
+                        rating - AVG(rating) OVER (PARTITION BY user_id) AS normalized_rating
+                    FROM
+                        ratings
+                ),
+                user_similarity AS (
+                    SELECT
+                        r1.user_id AS user_a,
+                        r2.user_id AS user_b,
+                        COUNT(*) AS overlap_count,
+                        SUM(r1.normalized_rating * r2.normalized_rating) /
+                        NULLIF(
+                            (SQRT(SUM(POWER(r1.normalized_rating, 2))) * SQRT(SUM(POWER(r2.normalized_rating, 2)))),
+                            0
+                        ) AS raw_similarity_score
+                    FROM
+                        normalized_ratings r1
+                    JOIN
+                        normalized_ratings r2 ON r1.film_id = r2.film_id
+                    WHERE
+                        r1.user_id != r2.user_id
+                    GROUP BY
+                        r1.user_id, r2.user_id
+                ),
+                confidence_weighted_similarity AS (
+                    SELECT
+                        user_a,
+                        user_b,
+                        raw_similarity_score,
+                        overlap_count,
+                        raw_similarity_score * (overlap_count / (overlap_count + 5.0)) AS adjusted_similarity_score
+                    FROM
+                        user_similarity
+                    WHERE
+                        raw_similarity_score IS NOT NULL -- Exclude cases where similarity could not be calculated
+                )
+                SELECT
+                    COUNT(*) OVER() AS total_count,
+                    ua.username AS user_a,
+                    ub.username AS neighbor_username,
+                    ub.display_name AS neighbor_display_name,
+                    cws.adjusted_similarity_score AS similarity_score,
+                    cws.overlap_count
+                FROM
+                    confidence_weighted_similarity cws
+                JOIN
+                    users ua ON cws.user_a = ua.user_id
+                JOIN
+                    users ub ON cws.user_b = ub.user_id
+                WHERE
+                    ua.username = $1
+                ORDER BY
+                    UPPER(ub.display_name) ASC
+                LIMIT $2 OFFSET $3;
+            `;
+        }
+
+        const { rows } = await pool.query(query, [username, limit, offset]);
+        console.log(`Query returned ${rows.length} rows.`);
+        if (rows.length > 0) {
+            console.log(`total_count: ${rows[0].total_count}`);
+        }
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching members:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
