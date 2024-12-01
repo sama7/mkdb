@@ -113,7 +113,7 @@ export default function MemberDetails() {
         );
     }
 
-    if (!memberLoading && neighborsLoading && !totalPages) {
+    if (!memberLoading && member && neighborsLoading && !totalPages) {
         return (
             <div className="container">
                 <div className="mt-3 text-center user-title">
@@ -146,7 +146,7 @@ export default function MemberDetails() {
         );
     }
 
-    if (!memberLoading && neighborsLoading && totalPages) {
+    if (!memberLoading && member && neighborsLoading && totalPages) {
         return (
             <div className="container">
                 <div className="mt-3 text-center user-title">
@@ -180,7 +180,7 @@ export default function MemberDetails() {
         );
     }
 
-    if (hasNoRatings) {
+    if (hasNoRatings && member) {
         return (
             <div className="container">
                 <div className="mt-3 text-center user-title">
@@ -217,13 +217,13 @@ export default function MemberDetails() {
         <div className="container">
             <div className="mt-3 text-center user-title">
                 <img
-                    src={`/images/avatars/${member.username}-large.jpg`}
-                    alt={`Large avatar of user: ${member.username}`}
+                    src={`/images/avatars/${member?.username}-large.jpg`}
+                    alt={`Large avatar of user: ${member?.username}`}
                     className="user-avatar-large"
                 />
                 <div className="username-and-watched">
                     <div className="username">
-                        <a href={`https://letterboxd.com/${member.username}`} target="_blank" rel="noopener noreferrer">
+                        <a href={`https://letterboxd.com/${member?.username}`} target="_blank" rel="noopener noreferrer">
                             {member.display_name}
                         </a>
                     </div>
