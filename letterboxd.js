@@ -14,7 +14,7 @@ async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
 
     const page = (await browser.pages())[0];
-    await page.goto(followingListURL);
+    await safeGoto(page, followingListURL);
 
     let usernames = [];
     let pageNum = 1;
@@ -84,7 +84,7 @@ async function scrapeUsernames(browser, client) {
 
                 // Download large avatar image to server
                 let avatarLargeSrc;
-                await page.goto(`https://letterboxd.com/${username}`);
+                await safeGoto(page, `https://letterboxd.com/${username}`);
                 avatarLargeSrc = await page.evaluate(() => {
                     return document.querySelector('div.profile-avatar img')?.getAttribute('src');
                 });
@@ -95,7 +95,7 @@ async function scrapeUsernames(browser, client) {
                     console.log(`Large avatar not found for ${username}`);
                 }
                 console.log(`Finished scraping user details for '${username}'`);
-                // Add a random delay between 1 to 3 seconds before moving on to the next user's profile for large-image
+                // Add a random delay between 1 to 3 seconds before moving on to the next user's profile for downloading large avatar
                 const delay = Math.floor(Math.random() * 2000) + 1000;
                 await new Promise(resolve => setTimeout(resolve, delay))
             } catch (err) {
@@ -109,7 +109,7 @@ async function scrapeUsernames(browser, client) {
         usernames = usernames.concat(pageUsernamesAndAvatars.map(user => user.username));
 
         // Navigate back to the Following list page that we were on
-        await page.goto(followingListURL + `page/${pageNum}`);
+        await safeGoto(page, followingListURL + `page/${pageNum}`);
 
         // Check if there is a "Next" button to go to the next page
         const nextPageLink = await page.$('a.next');
