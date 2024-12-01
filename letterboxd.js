@@ -94,6 +94,10 @@ async function scrapeUsernames(browser, client) {
                 } else {
                     console.log(`Large avatar not found for ${username}`);
                 }
+                console.log(`Finished scraping user details for '${username}'`);
+                // Add a random delay between 1 to 3 seconds before moving on to the next user's profile for large-image
+                const delay = Math.floor(Math.random() * 2000) + 1000;
+                await new Promise(resolve => setTimeout(resolve, delay))
             } catch (err) {
                 console.error(`Failed to insert username ${username}:`, err.stack);
             }
@@ -122,7 +126,7 @@ async function scrapeUsernames(browser, client) {
         // Wait for the next page to load
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
     }
-    page.close();
+    await page.close();
     console.log(`Total users found: ${usernames.length}`);
     return usernames;
 }
@@ -461,6 +465,7 @@ async function main() {
             headless: 'shell',
             executablePath: '/usr/bin/chromium-browser',
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            protocolTimeout: 120000, // 2 minutes timeout
         })
     } else {
         browser = await puppeteer.launch({ headless: 'shell' });
