@@ -14,7 +14,6 @@ async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
 
     const page = (await browser.pages())[0];
-    const tempPage = await browser.newPage(); // keeping extra temp page for getting large avatar
     await page.goto(followingListURL);
 
     let usernames = [];
@@ -85,8 +84,8 @@ async function scrapeUsernames(browser, client) {
 
                 // Download large avatar image to server
                 let avatarLargeSrc;
-                await tempPage.goto(`https://letterboxd.com/${username}`);
-                avatarLargeSrc = await tempPage.evaluate(() => {
+                await page.goto(`https://letterboxd.com/${username}`);
+                avatarLargeSrc = await page.evaluate(() => {
                     return document.querySelector('div.profile-avatar img')?.getAttribute('src');
                 });
                 if (avatarLargeSrc) {
@@ -105,6 +104,9 @@ async function scrapeUsernames(browser, client) {
         // Add the usernames from this page to the total list
         usernames = usernames.concat(pageUsernamesAndAvatars.map(user => user.username));
 
+        // Navigate back to the Following list page that we were on
+        await page.goto(followingListURL + `page/${pageNum}`);
+
         // Check if there is a "Next" button to go to the next page
         const nextPageLink = await page.$('a.next');
         if (!nextPageLink) {
@@ -121,7 +123,6 @@ async function scrapeUsernames(browser, client) {
         await page.waitForNavigation({ waitUntil: 'networkidle0' });
     }
     page.close();
-    tempPage.close();
     console.log(`Total users found: ${usernames.length}`);
     return usernames;
 }

@@ -566,63 +566,24 @@ export const getMemberNeighbors = async (req, res) => {
         const offset = (page - 1) * limit;  // for pagination
 
         let query = `
-            WITH normalized_ratings AS (
-                SELECT
-                    user_id,
-                    film_id,
-                    rating - AVG(rating) OVER (PARTITION BY user_id) AS normalized_rating
-                FROM
-                    ratings
-            ),
-            user_similarity AS (
-                SELECT
-                    r1.user_id AS user_a,
-                    r2.user_id AS user_b,
-                    COUNT(*) AS overlap_count,
-                    SUM(r1.normalized_rating * r2.normalized_rating) /
-                    NULLIF(
-                        (SQRT(SUM(POWER(r1.normalized_rating, 2))) * SQRT(SUM(POWER(r2.normalized_rating, 2)))),
-                        0
-                    ) AS raw_similarity_score
-                FROM
-                    normalized_ratings r1
-                JOIN
-                    normalized_ratings r2 ON r1.film_id = r2.film_id
-                WHERE
-                    r1.user_id != r2.user_id
-                GROUP BY
-                    r1.user_id, r2.user_id
-            ),
-            confidence_weighted_similarity AS (
-                SELECT
-                    user_a,
-                    user_b,
-                    raw_similarity_score,
-                    overlap_count,
-                    raw_similarity_score * (overlap_count / (overlap_count + 5.0)) AS adjusted_similarity_score
-                FROM
-                    user_similarity
-                WHERE
-                    raw_similarity_score IS NOT NULL -- Exclude cases where similarity could not be calculated
-            )
             SELECT
                 COUNT(*) OVER() AS total_count,
                 ua.username AS user_a,
                 ub.username AS neighbor_username,
                 ub.display_name AS neighbor_display_name,
-                cws.adjusted_similarity_score AS similarity_score,
-                cws.overlap_count
+                usc.adjusted_similarity_score AS similarity_score,
+                usc.overlap_count
             FROM
-                confidence_weighted_similarity cws
+                user_similarity_scores usc
             JOIN
-                users ua ON cws.user_a = ua.user_id
+                users ua ON usc.user_a = ua.user_id
             JOIN
-                users ub ON cws.user_b = ub.user_id
+                users ub ON usc.user_b = ub.user_id
             WHERE
                 ua.username = $1
             ORDER BY
-                cws.adjusted_similarity_score DESC
-            LIMIT $2 OFFSET $3;
+                usc.adjusted_similarity_score DESC
+            LIMIT $2 OFFSET $3
         `;
 
         // if sort is 'Similarity Score', just use the above query
@@ -630,63 +591,24 @@ export const getMemberNeighbors = async (req, res) => {
         // this is because you can't parameterize the ORDER BY value
         if (sort === 'Name') {
             query = `
-                WITH normalized_ratings AS (
-                    SELECT
-                        user_id,
-                        film_id,
-                        rating - AVG(rating) OVER (PARTITION BY user_id) AS normalized_rating
-                    FROM
-                        ratings
-                ),
-                user_similarity AS (
-                    SELECT
-                        r1.user_id AS user_a,
-                        r2.user_id AS user_b,
-                        COUNT(*) AS overlap_count,
-                        SUM(r1.normalized_rating * r2.normalized_rating) /
-                        NULLIF(
-                            (SQRT(SUM(POWER(r1.normalized_rating, 2))) * SQRT(SUM(POWER(r2.normalized_rating, 2)))),
-                            0
-                        ) AS raw_similarity_score
-                    FROM
-                        normalized_ratings r1
-                    JOIN
-                        normalized_ratings r2 ON r1.film_id = r2.film_id
-                    WHERE
-                        r1.user_id != r2.user_id
-                    GROUP BY
-                        r1.user_id, r2.user_id
-                ),
-                confidence_weighted_similarity AS (
-                    SELECT
-                        user_a,
-                        user_b,
-                        raw_similarity_score,
-                        overlap_count,
-                        raw_similarity_score * (overlap_count / (overlap_count + 5.0)) AS adjusted_similarity_score
-                    FROM
-                        user_similarity
-                    WHERE
-                        raw_similarity_score IS NOT NULL -- Exclude cases where similarity could not be calculated
-                )
                 SELECT
                     COUNT(*) OVER() AS total_count,
                     ua.username AS user_a,
                     ub.username AS neighbor_username,
                     ub.display_name AS neighbor_display_name,
-                    cws.adjusted_similarity_score AS similarity_score,
-                    cws.overlap_count
+                    usc.adjusted_similarity_score AS similarity_score,
+                    usc.overlap_count
                 FROM
-                    confidence_weighted_similarity cws
+                    user_similarity_scores usc
                 JOIN
-                    users ua ON cws.user_a = ua.user_id
+                    users ua ON usc.user_a = ua.user_id
                 JOIN
-                    users ub ON cws.user_b = ub.user_id
+                    users ub ON usc.user_b = ub.user_id
                 WHERE
                     ua.username = $1
                 ORDER BY
                     UPPER(ub.display_name) ASC
-                LIMIT $2 OFFSET $3;
+                LIMIT $2 OFFSET $3
             `;
         }
 
