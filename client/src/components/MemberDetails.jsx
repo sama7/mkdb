@@ -224,12 +224,12 @@ export default function MemberDetails() {
                 <div className="username-and-watched">
                     <div className="username">
                         <a href={`https://letterboxd.com/${member?.username}`} target="_blank" rel="noopener noreferrer">
-                            {member.display_name}
+                            {member?.display_name}
                         </a>
                     </div>
                     <div className="watched-cell">
                         <span className="icon"></span>
-                        {member.num_films_watched.toLocaleString()}
+                        {member?.num_films_watched.toLocaleString()}
                     </div>
                 </div>
             </div>
