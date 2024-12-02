@@ -179,7 +179,7 @@ async function scrapeFilmRatings(browser, client, username) {
             const filmElements = await page.$$('.poster-container');
 
             // Helper function to wait for a non-null attribute with a retry mechanism
-            const waitForAttribute = async (element, attribute, maxRetries = 5) => {
+            const waitForAttribute = async (element, attribute, maxRetries = 1) => {
                 const slug = await element.evaluate((el, attr) => el.getAttribute(attr), 'data-film-slug')
                 let value = null;
                 let attempt = 0;
@@ -206,6 +206,11 @@ async function scrapeFilmRatings(browser, client, username) {
 
                 // Wait for non-null values
                 const title = await waitForAttribute(titleElement, 'data-film-name');
+                if (!title) {
+                    i--;
+                    console.log(`Need to go back and restart Page ${i + 1}`);
+                    break;
+                }
                 let year = await waitForAttribute(titleElement, 'data-film-release-year');
                 const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
 
@@ -276,7 +281,7 @@ async function scrapeFilmRatings(browser, client, username) {
         } catch (err) {
             console.error(`Failed to load Page ${i} of ${totalPages} for user '${username}':`, err.message);
         }
-        console.log(`Finished Page ${i} of ${totalPages} for user '${username}'`);
+        // console.log(`Finished Page ${i} of ${totalPages} for user '${username}'`);
         // // Add a random delay between 1 to 3 seconds before moving on to the next page of films
         const delay = Math.floor(Math.random() * 2000) + 1000;
         await new Promise(resolve => setTimeout(resolve, delay))
@@ -295,6 +300,9 @@ async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeou
             return; // Successfully loaded the page
         } catch (err) {
             console.warn(`Attempt ${attempt} failed for ${url}: ${err.message}`);
+            // Add a delay before retrying
+            const delay = Math.floor(Math.random() * 2000) + 1000;
+            await new Promise(resolve => setTimeout(resolve, delay))
             if (attempt === 6) throw err; // Re-throw after 6 attempts
         }
     }
@@ -353,22 +361,22 @@ async function scrapeFilmDetails(browser, client) {
                 const page = await browser.newPage();
                 const URL = `https://letterboxd.com/film/${slug}/`;  // Film page URL
 
+                await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
+
+                // Extract the poster URL, TMDb URL, and synopsis
+                const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
+                    const posterElement = document.querySelector('img[width="230"][height="345"]');
+                    const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
+                    const synopsisElement = document.querySelector('meta[name="description"]');
+
+                    return {
+                        posterUrl: posterElement ? posterElement.src : null,
+                        tmdbUrl: tmdbElement ? tmdbElement.href : null,
+                        synopsis: synopsisElement ? synopsisElement.content : null
+                    };
+                });
+
                 try {
-                    await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
-
-                    // Extract the poster URL, TMDb URL, and synopsis
-                    const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
-                        const posterElement = document.querySelector('img[width="230"][height="345"]');
-                        const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
-                        const synopsisElement = document.querySelector('meta[name="description"]');
-
-                        return {
-                            posterUrl: posterElement ? posterElement.src : null,
-                            tmdbUrl: tmdbElement ? tmdbElement.href : null,
-                            synopsis: synopsisElement ? synopsisElement.content : null
-                        };
-                    });
-
                     // Download poster image if it exists
                     if (posterUrl) {
                         const imagePath = path.resolve(`./images/posters/${slug}.jpg`);
