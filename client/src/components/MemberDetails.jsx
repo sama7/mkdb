@@ -1,10 +1,17 @@
 import Pagination from './Pagination';
 import { useParams } from 'react-router-dom';
-import { useState } from 'react';
-import { useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Spinner from 'react-bootstrap/Spinner';
 import MemberNeighborsTable from './MemberNeighborsTable';
 import MemberSortNeighborsDropdown from './MemberSortNeighborsDropdown';
+
+export function usePrevious(value) {
+    const ref = useRef();
+    useEffect(() => {
+        ref.current = value;
+    }, [value]);
+    return ref.current;
+}
 
 export default function MemberDetails() {
     const { username } = useParams();
@@ -19,17 +26,23 @@ export default function MemberDetails() {
     const [memberLoading, setMemberLoading] = useState(true);
     const [neighborsLoading, setNeighborsLoading] = useState(true);
 
+    const prevUsername = usePrevious(username);
+
     useEffect(() => {
         setMemberLoading(true)
         fetchMemberDetails();
-        setPage(1);
-        setSort('Similarity Score');
-        setNeighborsLoading(true);
-        setTotalPages(null);
     }, [username]);
 
     useEffect(() => {
-        fetchMemberNeighbors();
+        if (username !== prevUsername) {
+            setNeighborsLoading(true)
+            setTotalPages(null);
+            setPage(1);
+            setSort('Similarity Score');
+            fetchMemberNeighbors(username, 1, 'Similarity Score');
+        } else {
+            fetchMemberNeighbors(username, page, sort);
+        }
     }, [username, page, sort]);
 
     const fetchMemberDetails = async () => {
@@ -53,7 +66,7 @@ export default function MemberDetails() {
         }
     };
 
-    const fetchMemberNeighbors = async () => {
+    const fetchMemberNeighbors = async (username, page, sort) => {
         try {
             const response = await fetch(`/api/member/${username}?page=${page}&sort=${sort}`);
             const rows = await response.json();
@@ -74,14 +87,14 @@ export default function MemberDetails() {
     };
 
     const handleSort = (eventKey) => {
+        setNeighborsLoading(true);
         setSort(eventKey);
         setPage(1); // Reset to first page when sort changes
-        setNeighborsLoading(true);
     };
 
     const handlePageChange = (newPage) => {
-        setPage(newPage);
         setNeighborsLoading(true);
+        setPage(newPage);
     };
 
     if (memberLoading && neighborsLoading) {
