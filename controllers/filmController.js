@@ -571,8 +571,9 @@ export const getMemberNeighbors = async (req, res) => {
                 ua.username AS user_a,
                 ub.username AS neighbor_username,
                 ub.display_name AS neighbor_display_name,
-                usc.adjusted_similarity_score AS similarity_score,
-                usc.overlap_count
+                usc.similarity_score AS similarity_score,
+                usc.overlap_count,
+                usc.avg_rating_distance
             FROM
                 user_similarity_scores usc
             JOIN
@@ -582,7 +583,7 @@ export const getMemberNeighbors = async (req, res) => {
             WHERE
                 ua.username = $1
             ORDER BY
-                usc.adjusted_similarity_score DESC
+                usc.similarity_score DESC
             LIMIT $2 OFFSET $3
         `;
 
@@ -596,8 +597,9 @@ export const getMemberNeighbors = async (req, res) => {
                     ua.username AS user_a,
                     ub.username AS neighbor_username,
                     ub.display_name AS neighbor_display_name,
-                    usc.adjusted_similarity_score AS similarity_score,
-                    usc.overlap_count
+                    usc.similarity_score AS similarity_score,
+                    usc.overlap_count,
+                    usc.avg_rating_distance
                 FROM
                     user_similarity_scores usc
                 JOIN

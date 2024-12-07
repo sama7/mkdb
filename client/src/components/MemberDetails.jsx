@@ -220,7 +220,7 @@ export default function MemberDetails() {
                     <MemberSortNeighborsDropdown sort={sort} handleSort={handleSort} />
                 </div>
                 <p className="text-start">
-                    Sorry, we aren’t able to calculate neighbors for this member. Either they haven’t rated any films yet or all their ratings are the same.
+                    Sorry, we aren’t able to calculate neighbors for this member. It looks like they haven’t rated any films yet.
                 </p>
             </div>
         );
