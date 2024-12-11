@@ -208,7 +208,7 @@ async function scrapeFilmRatings(browser, client, username) {
                 const title = await waitForAttribute(titleElement, 'data-film-name');
                 if (!title) {
                     i--;
-                    console.log(`Need to go back and restart Page ${i + 1}`);
+                    console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
                     break;
                 }
                 let year = await waitForAttribute(titleElement, 'data-film-release-year');
