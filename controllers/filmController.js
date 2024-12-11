@@ -527,14 +527,19 @@ export const getMemberDetails = async (req, res) => {
 
         let query = `
             SELECT
-                user_id,
-                username,
-                display_name,
-                num_films_watched
+                u.user_id,
+                u.username,
+                u.display_name,
+                u.num_films_watched,
+                AVG(r.rating) AS avg_rating
             FROM
-                users
+                users u
+            LEFT JOIN
+                ratings r ON r.user_id = u.user_id
             WHERE
-                username = $1
+                u.user_id = (SELECT user_id FROM users WHERE username = $1)
+            GROUP BY
+                u.user_id
         `;
 
         const memberResult = await pool.query(query, [username]);
@@ -622,6 +627,148 @@ export const getMemberNeighbors = async (req, res) => {
         res.json(rows);
     } catch (error) {
         console.error('Error fetching members:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get neighbor details between two members
+export const getNeighborDetails = async (req, res) => {
+    try {
+        const { username_a, username_b } = req.params;
+
+        const query = `
+            SELECT
+                ua.username AS user_a,
+                ub.username AS neighbor_username,
+                ub.display_name AS neighbor_display_name,
+                usc.similarity_score AS similarity_score,
+                usc.overlap_count,
+                usc.avg_rating_distance
+            FROM
+                user_similarity_scores usc
+            JOIN
+                users ua ON usc.user_a = ua.user_id
+            JOIN
+                users ub ON usc.user_b = ub.user_id
+            WHERE
+                ua.username = $1
+                AND ub.username = $2
+        `;
+
+        const result = await pool.query(query, [username_a, username_b]);
+        const neighborDetails = result.rows[0];
+        res.json(neighborDetails);
+    } catch (error) {
+        console.error('Error fetching neighbor details:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get the films upon which the two neighbors agreed on the rating - with pagination
+export const getNeighborAgreedFilms = async (req, res) => {
+    try {
+        const { username_a, username_b } = req.params;
+
+        // Extract page
+        const {
+            page = 1,
+            limit = 20,       // same as filmsPerPage
+        } = { ...req.query };
+
+        const offset = (page - 1) * limit;  // for pagination of films whose rating they agreed on
+
+        const query = `
+            SELECT
+                COUNT(*) OVER() AS total_count,
+                f.slug,
+                f.title,
+                f.year,
+                ua.username AS user_a_username,
+                ra.rating AS user_a_rating,
+                ub.username AS user_b_username,
+                rb.rating AS user_b_rating
+            FROM
+                ratings ra
+            JOIN
+                films f ON ra.film_id = f.film_id
+            JOIN
+                ratings rb ON ra.film_id = rb.film_id AND ra.user_id != rb.user_id
+            JOIN
+                users ua ON ra.user_id = ua.user_id
+            JOIN
+                users ub ON rb.user_id = ub.user_id
+            WHERE
+                ua.username = $1
+                AND ub.username = $2
+                AND ra.rating = rb.rating
+            ORDER BY
+                f.year, f.title
+            LIMIT $3 OFFSET $4
+        `;
+
+        const { rows } = await pool.query(query, [username_a, username_b, limit, offset]);
+
+        if (rows.length > 0) {
+            console.log(`Agreed films total_count: ${rows[0].total_count}`);
+        }
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching neighbor agreed films:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Function to get the films upon which the two neighbors differed on the rating - with pagination
+export const getNeighborDifferFilms = async (req, res) => {
+    try {
+        const { username_a, username_b } = req.params;
+
+        // Extract page
+        const {
+            page = 1,
+            limit = 20,       // same as filmsPerPage
+        } = { ...req.query };
+
+        const offset = (page - 1) * limit;  // for pagination of films whose rating they differed on
+
+        const query = `
+            SELECT
+                COUNT(*) OVER() AS total_count,
+                f.slug,
+                f.title,
+                f.year,
+                ua.username AS user_a_username,
+                ra.rating AS user_a_rating,
+                ub.username AS user_b_username,
+                rb.rating AS user_b_rating
+            FROM
+                ratings ra
+            JOIN
+                films f ON ra.film_id = f.film_id
+            JOIN
+                ratings rb ON ra.film_id = rb.film_id AND ra.user_id != rb.user_id
+            JOIN
+                users ua ON ra.user_id = ua.user_id
+            JOIN
+                users ub ON rb.user_id = ub.user_id
+            WHERE
+                ua.username = $1
+                AND ub.username = $2
+                AND ra.rating != rb.rating
+            ORDER BY
+                ABS(ra.rating - rb.rating) ASC, f.year, f.title
+            LIMIT $3 OFFSET $4
+        `;
+
+        const { rows } = await pool.query(query, [username_a, username_b, limit, offset]);
+
+        if (rows.length > 0) {
+            console.log(`Differ films total_count: ${rows[0].total_count}`);
+        }
+
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching neighbor differ films:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };

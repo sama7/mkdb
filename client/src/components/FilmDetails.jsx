@@ -94,7 +94,7 @@ const FilmDetails = () => {
                 <p><span className='big-rank'>MKDb Rank: {film.current_rank ? film.current_rank : 'N/A'}</span> {rankChange}</p>
                 {rankIndicator}
             </div>
-            <p><strong>Average Rating:</strong> {Number(film.average_rating).toFixed(2)}</p>
+            <p><strong>Average Rating:</strong> {Number(film.average_rating).toFixed(2)} / 5</p>
             <p><strong>Rating Count:</strong> {film.rating_count}</p>
 
             <p className="community-ratings">Community Ratings:</p>

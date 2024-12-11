@@ -210,6 +210,23 @@ button:focus-visible {
   font-size: 1.5em;
 }
 
+.star-rating-card {
+  color: #08c434;
+  font-size: 0.7em;
+}
+
+@media (min-width: 360px) {
+  .star-rating-card {
+    font-size: 0.8em;
+  }
+}
+
+@media (min-width: 992px) {
+  .star-rating-card {
+    font-size: 1em;
+  }
+}
+
 .user-avatar {
   width: 40px;
   border-radius: 50%;
@@ -417,4 +434,48 @@ div.user-title div.username-and-watched div.username {
 
 div.username-and-watched {
   align-self: center;
+}
+
+.circle-border {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: auto;
+  height: auto;
+  position: relative;
+}
+
+.circle-progress {
+  width: 3.5em;
+  height: 3.5em;
+  border-radius: 50%;
+  background: conic-gradient(#e0e0e0 0deg, #e0e0e0 360deg);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.circle-inner {
+  width: 3em;
+  height: 3em;
+  background-color: #121212; /* Match your app's background */
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: absolute;
+}
+
+.percentage-text {
+  font-size: 1em;
+  color: #fff;
+}
+
+.score-details {
+  display: flex;
+  place-items: center;
+}
+
+.score-details div.circle-border{
+  margin-left: 1em;
 }

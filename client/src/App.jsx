@@ -9,6 +9,7 @@ import FilmGridEvilMank from './components/FilmGridEvilMank';
 import Masterlist from './components/Masterlist';
 import Members from './components/Members';
 import MemberDetails from './components/MemberDetails';
+import NeighborDetails from './components/NeighborDetails';
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
             <Route path="/new" element={<WhatsNew />} />
             <Route path="/members" element={<Members />} />
             <Route path="/members/:username" element={<MemberDetails />} />
+            <Route path="/members/:username_a/:username_b" element={<NeighborDetails />} />
             <Route path="/masterlist" element={<Masterlist />} />
             <Route path="/evil-mank" element={<FilmGridEvilMank />} />
           </Routes>

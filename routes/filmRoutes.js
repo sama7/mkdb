@@ -30,6 +30,15 @@ router.get('/members/:username', filmController.getMemberDetails);
 // GET /api/member/:username - Retrieve a specific community member's details
 router.get('/member/:username', filmController.getMemberNeighbors);
 
+// GET /api/neighbors/:username_a/:username_b - Retrieve neighbor details between two community members
+router.get('/neighbors/:username_a/:username_b', filmController.getNeighborDetails);
+
+// GET /api/neighbors-agreed/:username_a/:username_b - Retrieve films whose rating the two neighbors agreed on
+router.get('/neighbors-agreed/:username_a/:username_b', filmController.getNeighborAgreedFilms);
+
+// GET /api/neighbors-differ/:username_a/:username_b - Retrieve films whose rating the two neighbors differed on
+router.get('/neighbors-differ/:username_a/:username_b', filmController.getNeighborDifferFilms);
+
 // GET /api/evil-mank - Retrieve top film rankings with optional filters
 router.get('/evil-mank', filmController.getEvilMankFilmRankings);
 

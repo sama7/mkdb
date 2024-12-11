@@ -244,6 +244,9 @@ export default function MemberDetails() {
                         <span className="icon"></span>
                         {member?.num_films_watched.toLocaleString()}
                     </div>
+                    <div>
+                        Average rating: {Number(member?.avg_rating).toFixed(2)} / 5
+                    </div>
                 </div>
             </div>
             <h3 className="mt-5 mb-3">Community Neighbors</h3>
