@@ -592,7 +592,7 @@ export default function NeighborDetails() {
             </div>
             <div className="my-4 text-start">
                 <p>
-                    Let’s look at the remaining {Number(differFilms[0]?.total_count)?.toLocaleString()} {filmString(Number(overlapCount))}, sorted from smallest rating difference to largest rating difference. The rating on top belongs to <strong>{firstMember?.display_name}</strong> and
+                    Let’s look at the remaining {Number(differFilms[0]?.total_count)?.toLocaleString()} {filmString(Number(differFilms[0]?.total_count))}, sorted from smallest rating difference to largest rating difference. The rating on top belongs to <strong>{firstMember?.display_name}</strong> and
                     the rating on the bottom belongs to <strong>{secondMember?.display_name}</strong>:
                 </p>
             </div>
