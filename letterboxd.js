@@ -216,8 +216,9 @@ async function scrapeFilmRatings(browser, client, username) {
 
                 if (year === null) {
                     // Need to navigate to film page to get the year
-                    await safeGoto(page, `https://letterboxd.com/film/${permalink}/`);
-                    year = await page.evaluate(() => {
+                    const tempPage = await browser.newPage();
+                    await safeGoto(tempPage, `https://letterboxd.com/film/${permalink}/`);
+                    year = await tempPage.evaluate(() => {
                         const yearElement = document.querySelector('div.releaseyear a');
                         if (yearElement === null) {
                             return "";
@@ -225,7 +226,8 @@ async function scrapeFilmRatings(browser, client, username) {
                         return yearElement.textContent.trim();
                     });
                     // Navigate back to the page we were on
-                    await safeGoto(page, URL + i);
+                    // await safeGoto(page, URL + i);
+                    await tempPage.close();
                 }
 
                 if (year === "") {
