@@ -215,9 +215,17 @@ async function scrapeFilmRatings(browser, client, username) {
                 const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
 
                 if (year === null) {
-                    i--;
-                    console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
-                    break;
+                    // Need to navigate to film page to get the year
+                    await safeGoto(page, `https://letterboxd.com/film/${permalink}/`);
+                    year = await page.evaluate(() => {
+                        const yearElement = document.querySelector('div.releaseyear a');
+                        if (yearElement === null) {
+                            return "";
+                        }
+                        return yearElement.textContent.trim();
+                    });
+                    // Navigate back to the page we were on
+                    await safeGoto(page, URL + i);
                 }
 
                 if (year === "") {
