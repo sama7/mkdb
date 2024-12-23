@@ -189,7 +189,7 @@ async function scrapeFilmRatings(browser, client, username) {
                     if (value === null) {
                         attempt++;
                         const delay = attempt * 500; // Increase delay with each retry (500ms, 1000ms, 1500ms, etc.)
-                        console.log(`Attempt ${attempt}: ${attribute} not found for user '${username}' -> film '${slug}', retrying in ${delay}ms...`);
+                        // console.log(`Attempt ${attempt}: ${attribute} not found for user '${username}' -> film '${slug}', retrying in ${delay}ms...`);
                         await new Promise(resolve => setTimeout(resolve, delay));
                     }
                 }
