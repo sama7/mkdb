@@ -206,13 +206,19 @@ async function scrapeFilmRatings(browser, client, username) {
 
                 // Wait for non-null values
                 const title = await waitForAttribute(titleElement, 'data-film-name');
-                if (!title) {
+                if (title === null) {
                     i--;
                     console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
                     break;
                 }
                 let year = await waitForAttribute(titleElement, 'data-film-release-year');
                 const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
+
+                if (year === null) {
+                    i--;
+                    console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
+                    break;
+                }
 
                 if (year === "") {
                     year = null; // Replace empty string with null, as database only accepts integers or null
