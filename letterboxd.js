@@ -173,7 +173,6 @@ async function scrapeFilmRatings(browser, client, username) {
             }
 
             await page.waitForSelector('.film-poster[data-film-name]');
-            await page.waitForSelector('.film-poster[data-film-release-year]');
 
             // Get the total number of films on the page
             const filmElements = await page.$$('.poster-container');
@@ -211,28 +210,7 @@ async function scrapeFilmRatings(browser, client, username) {
                     console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
                     break;
                 }
-                let year = await waitForAttribute(titleElement, 'data-film-release-year');
                 const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
-
-                if (year === null) {
-                    // Need to navigate to film page to get the year
-                    const tempPage = await browser.newPage();
-                    await safeGoto(tempPage, `https://letterboxd.com/film/${permalink}/`);
-                    year = await tempPage.evaluate(() => {
-                        const yearElement = document.querySelector('div.releaseyear a');
-                        if (yearElement === null) {
-                            return "";
-                        }
-                        return yearElement.textContent.trim();
-                    });
-                    // Navigate back to the page we were on
-                    // await safeGoto(page, URL + i);
-                    await tempPage.close();
-                }
-
-                if (year === "") {
-                    year = null; // Replace empty string with null, as database only accepts integers or null
-                }
 
                 // Wait for the "rated-x" class to appear within the "poster-viewingdata" element
                 const ratingClass = await filmElement.$eval('.poster-viewingdata span[class*="rated-"]', el => {
@@ -248,19 +226,19 @@ async function scrapeFilmRatings(browser, client, username) {
                 }
 
                 // Push the extracted data into the films array ()
-                films.push({ title, year, rating, permalink });
+                films.push({ title, rating, permalink });
 
                 // Insert or update film in the database
                 const filmInsertQuery = `
-                INSERT INTO films (title, year, slug, time_created, time_modified)
-                VALUES ($1, $2, $3, NOW(), NOW())
+                INSERT INTO films (title, slug, time_created, time_modified)
+                VALUES ($1, $2, NOW(), NOW())
                 ON CONFLICT (slug) DO NOTHING
                 RETURNING film_id;
             `;
                 let filmId;
 
                 try {
-                    const result = await client.query(filmInsertQuery, [title, year, permalink]);
+                    const result = await client.query(filmInsertQuery, [title, permalink]);
                     filmId = result.rows.length > 0 ? result.rows[0].film_id : null;
                 } catch (err) {
                     console.error(`Failed to insert film '${permalink}' for user '${username}':`, err.stack);
@@ -380,15 +358,17 @@ async function scrapeFilmDetails(browser, client) {
                 await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
 
                 // Extract the poster URL, TMDb URL, and synopsis
-                const { posterUrl, tmdbUrl, synopsis } = await page.evaluate(() => {
+                const { posterUrl, tmdbUrl, synopsis, year } = await page.evaluate(() => {
                     const posterElement = document.querySelector('img[width="230"][height="345"]');
                     const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
                     const synopsisElement = document.querySelector('meta[name="description"]');
+                    const yearElement = document.querySelector('div.releaseyear a');
 
                     return {
                         posterUrl: posterElement ? posterElement.src : null,
                         tmdbUrl: tmdbElement ? tmdbElement.href : null,
-                        synopsis: synopsisElement ? synopsisElement.content : null
+                        synopsis: synopsisElement ? synopsisElement.content : null,
+                        year: yearElement ? yearElement.textContent.trim() : null,
                     };
                 });
 
@@ -432,8 +412,8 @@ async function scrapeFilmDetails(browser, client) {
                 // Update the database with the TMDb URL, synopsis, and genres
                 try {
                     await client.query(
-                        `UPDATE films SET tmdb = $1, synopsis = $2, genres = $3, time_modified = NOW() WHERE slug = $4`,
-                        [tmdbUrl, synopsis, genres, slug]
+                        `UPDATE films SET tmdb = $1, synopsis = $2, year = $3, genres = $4, time_modified = NOW() WHERE slug = $5`,
+                        [tmdbUrl, synopsis, year, genres, slug]
                     );
                     console.log(`Updated film details and genres for ${slug}`);
                 } catch (err) {
