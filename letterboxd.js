@@ -287,7 +287,7 @@ async function scrapeFilmRatings(browser, client, username) {
     console.log(`Scraping ${films.length} films for user '${username}' took ${timeToScrape.toFixed(2)} seconds: ${scrapingSpeed.toFixed(2)} films/second`);
 }
 
-async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 60000 }) {
+async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 120000 }) {
     for (let attempt = 1; attempt <= 6; attempt++) {
         try {
             await page.goto(url, options);
