@@ -95,8 +95,8 @@ async function scrapeUsernames(browser, client) {
                     console.log(`Large avatar not found for ${username}`);
                 }
                 console.log(`Finished scraping user details for '${username}'`);
-                // Add a random delay between 1 to 3 seconds before moving on to the next user's profile for downloading large avatar
-                const delay = Math.floor(Math.random() * 2000) + 1000;
+                // Add a random delay between 5 to 7 seconds before moving on to the next user's profile for downloading large avatar
+                const delay = Math.floor(Math.random() * 2000) + 5000;
                 await new Promise(resolve => setTimeout(resolve, delay))
             } catch (err) {
                 console.error(`Failed to insert username ${username}:`, err.stack);
@@ -287,15 +287,15 @@ async function scrapeFilmRatings(browser, client, username) {
     console.log(`Scraping ${films.length} films for user '${username}' took ${timeToScrape.toFixed(2)} seconds: ${scrapingSpeed.toFixed(2)} films/second`);
 }
 
-async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 120000 }) {
+async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 60000 }) {
     for (let attempt = 1; attempt <= 6; attempt++) {
         try {
             await page.goto(url, options);
             return; // Successfully loaded the page
         } catch (err) {
             console.warn(`Attempt ${attempt} failed for ${url}: ${err.message}`);
-            // Add a delay before retrying
-            const delay = Math.floor(Math.random() * 2000) + 1000;
+            // Add a delay before retrying (5–7 seconds)
+            const delay = Math.floor(Math.random() * 2000) + 5000;
             await new Promise(resolve => setTimeout(resolve, delay))
             if (attempt === 6) throw err; // Re-throw after 6 attempts
         }
