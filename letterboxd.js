@@ -288,14 +288,15 @@ async function scrapeFilmRatings(browser, client, username) {
 }
 
 async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeout: 60000 }) {
-    for (let attempt = 1; attempt <= 6; attempt++) {
+    for (let attempt = 1; attempt <= 10; attempt++) {
         try {
             await page.goto(url, options);
             return; // Successfully loaded the page
         } catch (err) {
             console.warn(`Attempt ${attempt} failed for ${url}: ${err.message}`);
             // Add a delay before retrying (5–7 seconds)
-            const delay = Math.floor(Math.random() * 2000) + 5000;
+            // "exponential" backoff strategy: delay increases with each attempt
+            const delay = Math.floor(Math.random() * 2000 * attempt) + 5000;
             await new Promise(resolve => setTimeout(resolve, delay))
             if (attempt === 6) throw err; // Re-throw after 6 attempts
         }
