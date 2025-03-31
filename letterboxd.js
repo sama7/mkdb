@@ -298,7 +298,7 @@ async function safeGoto(page, url, options = { waitUntil: 'networkidle0', timeou
             // "exponential" backoff strategy: delay increases with each attempt
             const delay = Math.floor(Math.random() * 2000 * attempt) + 5000;
             await new Promise(resolve => setTimeout(resolve, delay))
-            if (attempt === 6) throw err; // Re-throw after 6 attempts
+            if (attempt === 10) throw err; // Re-throw after 10 attempts
         }
     }
 }
@@ -335,7 +335,7 @@ async function scrapeFilmDetails(browser, client) {
     const start = performance.now();
     try {
         // Get all slugs from the films table
-        const { rows } = await client.query('SELECT slug FROM films ORDER BY film_id');
+        const { rows } = await client.query("SELECT slug FROM films ORDER BY film_id");
         const slugs = rows.map(row => row.slug);
         console.log(`Found ${slugs.length} films to scrape for details`);
 
@@ -538,6 +538,7 @@ async function main() {
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
         */
+       
         const finish = performance.now();
         const timeToScrape = (finish - start) / 1000;
         console.log(`Scraping of film ratings for all users took ${timeToScrape.toFixed(2)} seconds`);
