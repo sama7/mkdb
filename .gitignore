@@ -7,7 +7,7 @@ images/
 dumps/
 .env
 
-# Remaining: Client directories and files
+# Client directories and files
 
 # Logs
 client/logs
@@ -33,3 +33,7 @@ client/*.ntvs*
 client/*.njsproj
 client/*.sln
 client/*.sw?
+
+# Discord bot directories and files
+discord-bot/node_modules
+discord-bot/.env

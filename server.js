@@ -3,6 +3,7 @@ import path from 'path';
 const __dirname = path.resolve();
 import 'dotenv/config';
 import filmRoutes from './routes/filmRoutes.js';
+import discordRoutes from './routes/discordRoutes.js';
 import cors from 'cors';
 
 const app = express();
@@ -23,6 +24,7 @@ app.use('/images', express.static(path.join(__dirname, 'images')));
 
 // Routes
 app.use('/api', filmRoutes);
+app.use('/api/discord', discordRoutes);
 
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {
