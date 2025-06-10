@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import puppeteer from 'puppeteer';
 
 let browserPromise;          // resolved once and reused
