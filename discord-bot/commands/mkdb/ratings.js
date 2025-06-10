@@ -146,10 +146,6 @@ module.exports = {
     });
 
     collector.on('collect', async (btn) => {
-      if (btn.user.id !== interaction.user.id) {
-        return btn.reply({ content: "Those buttons aren't for you.", ephemeral: true });
-      }
-
       const max = TOTAL_PAGES - 1;
       switch (btn.customId) {
         case 'first':
