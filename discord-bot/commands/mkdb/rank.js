@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { EmbedBuilder } = require('discord.js');
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
+const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
 /**
  * Truncate synopsis on a word‑boundary and append ellipsis.
@@ -40,9 +41,9 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle(`${film.title} (${film.year ?? '—'})`)
-      .setURL(`https://mkdb.co/film/${film.slug}`)
+      .setURL(`${MKDB_BASE_URL}/film/${film.slug}`)
       .setDescription(film.synopsis ? truncateSynopsis(film.synopsis, 500) : '—')
-      .setThumbnail(`https://mkdb.co/images/posters/${film.slug}.jpg`)
+      .setThumbnail(`${MKDB_BASE_URL}/images/posters/${film.slug}.jpg`)
       .addFields(
         { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
         { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },

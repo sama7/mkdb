@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { EmbedBuilder } = require('discord.js');
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
+const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
 /**
  * Truncate synopsis on a word‑boundary and append ellipsis.

@@ -8,6 +8,7 @@ const {
 } = require('discord.js');
 
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
+const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 const PAGE_SIZE = 10;     // ratings shown per page
 
 // Convert a numeric rating to star/half‑star symbols
@@ -96,8 +97,8 @@ module.exports = {
 
       return new EmbedBuilder()
         .setTitle(`${film.title} (${film.year ?? '—'}) — Community ratings`)
-        .setURL(`https://mkdb.co/film/${slug}`)
-        .setThumbnail(`https://mkdb.co/images/posters/${slug}.jpg`)
+        .setURL(`${MKDB_BASE_URL}/film/${slug}`)
+        .setThumbnail(`${MKDB_BASE_URL}/images/posters/${slug}.jpg`)
         .setDescription(slice.join('\n'))
         .addFields(
           { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },

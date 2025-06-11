@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const path   = require('node:path');
+const path = require('node:path');
 const subcmds = ['search', 'rank', 'random', 'ratings'];
 
 // Load each sub‑command file once and cache it
@@ -30,9 +30,21 @@ module.exports = {
           o.setName('number').setDescription('1‑1000').setMinValue(1).setMaxValue(1000).setRequired(true),
         ),
     )
-    // /mkdb random
+    // /mkdb random [scope]
     .addSubcommand(sc =>
-      sc.setName('random').setDescription('Random film from MKDb Top 1000'),
+      sc
+        .setName('random')
+        .setDescription('Random film from MKDb')
+        .addStringOption(o =>
+          o
+            .setName('scope')
+            .setDescription('Where to pick the film from')
+            .addChoices(
+              { name: 'top1000', value: 'top1000' },
+              { name: 'ultramank', value: 'ultramank' },
+            )
+            .setRequired(false),
+        ),
     )
     // /mkdb ratings query:<text>
     .addSubcommand(sc =>
@@ -43,7 +55,7 @@ module.exports = {
         ),
     ),
 
-  async execute (interaction) {
+  async execute(interaction) {
     const sub = interaction.options.getSubcommand();
     const handler = handlers[sub];
 

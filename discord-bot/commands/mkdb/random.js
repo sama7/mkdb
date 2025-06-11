@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { EmbedBuilder } = require('discord.js');
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
+const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
 /**
  * Truncate synopsis on a word‑boundary and append ellipsis.
@@ -22,7 +23,10 @@ module.exports = {
   async execute(interaction) {
     await interaction.deferReply();
 
-    const rank = Math.floor(Math.random() * 1000) + 1; // Random rank between 1 and 1000
+    const scope = (interaction.options.getString('scope') || 'top1000').toLowerCase();
+    const topFilmScope = scope === 'ultramank' ? 250 : 1000;   // default 1000
+
+    const rank = Math.floor(Math.random() * topFilmScope) + 1; // Random rank between 1 and the top film scope (1000 or 250)
 
     const res = await fetch(`${MKDB_API_BASE}/films/rank/${rank}`);
     if (!res.ok) return interaction.editReply('❌  Could not fetch that rank.');
@@ -31,9 +35,9 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle(`${film.title} (${film.year ?? '—'})`)
-      .setURL(`https://mkdb.co/film/${film.slug}`)
+      .setURL(`${MKDB_BASE_URL}/film/${film.slug}`)
       .setDescription(film.synopsis ? truncateSynopsis(film.synopsis, 500) : '—')
-      .setThumbnail(`https://mkdb.co/images/posters/${film.slug}.jpg`)
+      .setThumbnail(`${MKDB_BASE_URL}/images/posters/${film.slug}.jpg`)
       .addFields(
         { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
         { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
