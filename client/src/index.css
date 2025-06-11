@@ -164,6 +164,7 @@ button:focus-visible {
 .rank-up {
   color: #08c434;
   font-weight: bold;
+  margin-right: 0.25em;
 }
 
 .rank-up-risers {
@@ -176,6 +177,7 @@ button:focus-visible {
 .rank-down {
   color: red;
   font-weight: bold;
+  margin-right: 0.25em;
 }
 
 .rank-down-fallers {
@@ -203,6 +205,11 @@ button:focus-visible {
 
 .rank-section img {
   width: 40px;
+}
+
+.rank-section img.ultramank-icon {
+  width: 30px;
+  margin-left: 10px;
 }
 
 .star-rating {

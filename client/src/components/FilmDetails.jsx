@@ -74,6 +74,12 @@ const FilmDetails = () => {
         rankIndicator = <img src="/images/icons/former_mank.png" alt="Newly departed from the MKDb Top 1000" title="Newly departed from the MKDb Top 1000" />;
     }
 
+    // Determine if the film's rank is within the Top 250
+    let ultramankIndicator = null;
+    if (film.current_rank && film.current_rank <= 250) {
+        ultramankIndicator = <img src="/images/icons/ultramank.png" alt="Part of the MKDb Top 250" title="Part of the MKDb Top 250" className="ultramank-icon" />;
+    }
+
     // Function to convert rating to stars with symbols
     const getStarSymbols = (rating) => {
         const fullStars = Math.floor(rating);
@@ -93,6 +99,7 @@ const FilmDetails = () => {
 
                 <p><span className='big-rank'>MKDb Rank: {film.current_rank ? film.current_rank : 'N/A'}</span> {rankChange}</p>
                 {rankIndicator}
+                {ultramankIndicator}
             </div>
             <p><strong>Average Rating:</strong> {Number(film.average_rating).toFixed(2)} / 5</p>
             <p><strong>Rating Count:</strong> {film.rating_count}</p>
