@@ -54,7 +54,7 @@ export const searchFilm = async (req, res) => {
     try {
         /* --------------- step 2: puppeteer scrape ---------- */
         const browser = await getBrowser();           // singleton
-        page    = await browser.newPage();
+        page = await browser.newPage();
         await safeGoto(page, url);
 
         /* --------------- step 3: pull slug ----------------- */
@@ -97,7 +97,7 @@ export const searchFilm = async (req, res) => {
         return res.status(500).json({ error: 'Internal Server Error' });
     } finally {
         /* always close resources */
-        if (page) await page.close().catch(() => {});
+        if (page) await page.close().catch(() => { });
     }
 };
 
@@ -168,7 +168,7 @@ export const searchFilmRatings = async (req, res) => {
         console.error('Error in /films/ratings:', err);
         return res.status(500).json({ error: 'Internal Server Error' });
     } finally {
-        if (page) await page.close().catch(() => {});
+        if (page) await page.close().catch(() => { });
     }
 };
 
@@ -221,6 +221,58 @@ export const getFilmByRank = async (req, res) => {
         res.json({ film });
     } catch (err) {
         console.error('Error fetching film by rank:', err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+/**
+ * GET  /films/nearmank/:rank   (1 ≤ rank ≤ 50)
+ * Top-50 films by highest average ★ (≥ 7 ratings && ≤ 9 ratings)
+ */
+export const getNearMankFilmByRank = async (req, res) => {
+    const rank = Number(req.params.rank);
+    if (!Number.isInteger(rank) || rank < 1 || rank > 50) {
+        return res.status(400).json({ error: 'Rank must be between 1 and 50.' });
+    }
+
+    try {
+        const query = `
+      WITH ranked AS (
+        SELECT
+          f.film_id,
+          f.title,
+          f.year,
+          f.slug,
+          f.synopsis,
+          AVG(r.rating)               AS average_rating,
+          COUNT(r.rating)             AS rating_count,
+          ROW_NUMBER() OVER (ORDER BY AVG(r.rating) DESC,
+                                      COUNT(r.rating) DESC) AS ranking
+        FROM   films   f
+        JOIN   ratings r ON r.film_id = f.film_id
+        WHERE  f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
+        GROUP  BY f.film_id
+        HAVING COUNT(r.rating) BETWEEN 7 AND 9            -- 7 ≤ ratings ≤ 9
+      )
+      SELECT
+        ranked.*,
+        (
+          SELECT frh.ranking
+          FROM   film_rankings_history frh
+          WHERE  frh.film_id = ranked.film_id
+          AND    frh.week = (SELECT MAX(week) FROM film_rankings_history)
+        ) AS current_rank
+      FROM ranked
+      WHERE ranked.ranking = $1;
+    `;
+
+        const { rows } = await pool.query(query, [rank]);
+        if (!rows[0])
+            return res.status(404).json({ error: 'Rank not found.' });
+
+        res.json({ film: rows[0] });
+    } catch (err) {
+        console.error('Error in getNearMankFilmByRank:', err);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };
