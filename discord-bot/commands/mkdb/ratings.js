@@ -98,7 +98,7 @@ module.exports = {
       return new EmbedBuilder()
         .setTitle(`${film.title} (${film.year ?? '—'}) — Community ratings`)
         .setURL(`${MKDB_BASE_URL}/film/${slug}`)
-        .setThumbnail(`${MKDB_BASE_URL}/images/posters/${slug}.jpg`)
+        .setThumbnail(`https://mkdb.co/images/posters/${slug}.jpg`)
         .setDescription(slice.join('\n'))
         .addFields(
           { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },

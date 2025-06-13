@@ -24,20 +24,42 @@ module.exports = {
     await interaction.deferReply();
 
     const scope = (interaction.options.getString('scope') || 'top1000').toLowerCase();
-    const topFilmScope = scope === 'ultramank' ? 250 : 1000;   // default 1000
 
-    const rank = Math.floor(Math.random() * topFilmScope) + 1; // Random rank between 1 and the top film scope (1000 or 250)
+    // ── decide which bucket we are drawing from ──────────────────────────────
+    let topFilmScope;      // how many ranks we can pick from
+    let apiPathBase;       // which API endpoint to hit
 
-    const res = await fetch(`${MKDB_API_BASE}/films/rank/${rank}`);
+    switch (scope) {
+      case 'ultramank':               // top‑250 (“Ultra‑MANK”)
+        topFilmScope = 250;
+        apiPathBase  = '/films/rank/';       // existing endpoint
+        break;
+
+      case 'nearmank':                // top‑50 high‑average films w/ 7‑9 ratings
+        topFilmScope = 50;
+        apiPathBase  = '/films/nearmank/';   // **new** endpoint
+        break;
+
+      default:                        // 'top1000'
+        topFilmScope = 1000;
+        apiPathBase  = '/films/rank/';
+    }
+
+    // pick a random rank inside that scope
+    const rank = Math.floor(Math.random() * topFilmScope) + 1;
+
+    // ── fetch film details ───────────────────────────────────────────────────
+    const res = await fetch(`${MKDB_API_BASE}${apiPathBase}${rank}`);
     if (!res.ok) return interaction.editReply('❌  Could not fetch that rank.');
+
     const { film } = await res.json();
-    if (!film) return interaction.editReply('Rank not found in current top 1000.');
+    if (!film) return interaction.editReply('Rank not found in the selected list.');
 
     const embed = new EmbedBuilder()
       .setTitle(`${film.title} (${film.year ?? '—'})`)
       .setURL(`${MKDB_BASE_URL}/film/${film.slug}`)
       .setDescription(film.synopsis ? truncateSynopsis(film.synopsis, 500) : '—')
-      .setThumbnail(`${MKDB_BASE_URL}/images/posters/${film.slug}.jpg`)
+      .setThumbnail(`https://mkdb.co/images/posters/${film.slug}.jpg`)
       .addFields(
         { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
         { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },

@@ -43,7 +43,7 @@ module.exports = {
       .setTitle(`${film.title} (${film.year ?? '—'})`)
       .setURL(`${MKDB_BASE_URL}/film/${film.slug}`)
       .setDescription(film.synopsis ? truncateSynopsis(film.synopsis, 500) : '—')
-      .setThumbnail(`${MKDB_BASE_URL}/images/posters/${film.slug}.jpg`)
+      .setThumbnail(`https://mkdb.co/images/posters/${film.slug}.jpg`)
       .addFields(
         { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
         { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },

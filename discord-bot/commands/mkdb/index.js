@@ -42,6 +42,7 @@ module.exports = {
             .addChoices(
               { name: 'top1000', value: 'top1000' },
               { name: 'ultramank', value: 'ultramank' },
+              { name: 'nearmank', value: 'nearmank' },
             )
             .setRequired(false),
         ),
