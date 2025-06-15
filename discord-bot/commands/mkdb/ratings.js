@@ -45,16 +45,25 @@ module.exports = {
       `${MKDB_API_BASE}/films/ratings?query=${encodeURIComponent(query)}`,
     );
 
+    // Try to parse JSON even on non-200 responses
+    let payload;
+    try { payload = await res.json(); } catch (_) { payload = null; }
+
     if (!res.ok) {
-      return interaction.editReply('❌  Could not fetch that film / ratings.');
+      if (payload?.code === 'NO_LETTERBOXD_RESULT') {
+        return interaction.editReply(`🔍 No film found for \`${query}\`. Please check your spelling.`);
+      }
+      if (payload?.code === 'NOT_ON_MKDB') {
+        return interaction.editReply(
+          `We found a film, but it's not on MKDb. That means none of us have ` +
+          `rated it yet. Please try sending the command: \`!f ${query}\``
+        );
+      }
+      return interaction.editReply('❌ Server error while searching.');
     }
 
-    const { slug, film, ratings } = await res.json();
-
-    if (!film) return interaction.editReply('Film not found.');
-    if (!ratings?.length) {
-      return interaction.editReply('Nobody in the community has rated this yet.');
-    }
+    // Successful response
+    const { slug, film, ratings } = payload;
 
     /* ----- pre‑compute linear list of lines grouped by star value ----- */
     const starOrder = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5];
@@ -65,9 +74,9 @@ module.exports = {
       const header = `**${getStarSymbols(star)}**:`;    // add colon for clarity
       users.forEach((u, idx) => {
         if (idx === 0) groupedLines.push(header);   // repeat header for first user
-        const name      = u.display_name ?? u.username;
-        const profile   = `https://letterboxd.com/${u.username}`;
-        const activity  = `https://letterboxd.com/${u.username}/film/${slug}/activity/`;
+        const name = u.display_name ?? u.username;
+        const profile = `https://letterboxd.com/${u.username}`;
+        const activity = `https://letterboxd.com/${u.username}/film/${slug}/activity/`;
         groupedLines.push(`• [${name}](${profile}) - [activity](${activity})`);
       });
     }

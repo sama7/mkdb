@@ -33,23 +33,44 @@ export const searchFilm = async (req, res) => {
         const slug = $('div[data-type="film"][data-film-slug]').first().attr('data-film-slug');
 
         if (!slug) {
-            return res.status(404).json({ error: 'No matching film found on Letterboxd.' });
+            // Nothing came back from Letterboxd
+            return res
+                .status(404)
+                .json({ code: 'NO_LETTERBOXD_RESULT', message: 'No film found.' });
         }
 
         /* ---------- 3) Re‑use getFilmDetails(slug) ---------- */
         const fakeReq = { params: { slug } };
-        let detailsPayload;
+
+        let detailsPayload;          // will hold { film, ratings? }
+
         const fakeRes = {
             json: (p) => { detailsPayload = p; },
             status: (code) => ({
-                json: (p) => { throw { code, payload: p }; },
+                json: (p) => { throw { code, payload: p }; },   // propagate status
             }),
         };
 
-        await getFilmDetails(fakeReq, fakeRes);
+        try {
+            await getFilmDetails(fakeReq, fakeRes);
+        } catch (err) {
+            console.log('Error in getFilmDetails:', err);
 
-        if (!detailsPayload?.film) {
-            return res.status(500).json({ error: 'Failed to retrieve film details.' });
+            // ── FILM EXISTS ON LETTERBOXD BUT NOT ON MKDb ────────────────
+            // getFilmDetails turns our internal 404 into its own 500
+            // so we have to look for that pattern here.
+            const notFound =
+                (Number(err.code) === 404) ||
+                (Number(err.code) === 500 && err.payload?.error === 'Film not found');
+
+            if (notFound) {
+                return res.status(404).json({
+                    code: 'NOT_ON_MKDB',
+                    slug,
+                    message: 'Film exists on Letterboxd but not on MKDb.',
+                });
+            }
+            throw err;
         }
 
         /* ---------- 4) Return slug + film (same shape as before) ----- */
@@ -91,7 +112,10 @@ export const searchFilmRatings = async (req, res) => {
         const slug = $('div[data-type="film"][data-film-slug]').first().attr('data-film-slug');
 
         if (!slug) {
-            return res.status(404).json({ error: 'No matching film found on Letterboxd.' });
+            // Nothing came back from Letterboxd
+            return res
+                .status(404)
+                .json({ code: 'NO_LETTERBOXD_RESULT', message: 'No film found.' });
         }
 
         /* ---------- 3) Re‑use getFilmDetails() ---------- */
@@ -108,12 +132,22 @@ export const searchFilmRatings = async (req, res) => {
             }),
         };
 
-        await getFilmDetails(fakeReq, fakeRes);
+        try {
+            await getFilmDetails(fakeReq, fakeRes);
+        } catch (err) {
+            // ── FILM EXISTS ON LBx BUT NOT ON MKDb ───────────────────
+            const notFound =
+                (Number(err.code) === 404) ||
+                (Number(err.code) === 500 && err.payload?.error === 'Film not found');
 
-        if (!details?.film) {
-            return res
-                .status(500)
-                .json({ error: 'Failed to retrieve film details.' });
+            if (notFound) {
+                return res.status(404).json({
+                    code: 'NOT_ON_MKDB',
+                    slug,
+                    message: 'Film exists on Letterboxd but not on MKDb.',
+                });
+            }
+            throw err;           // bubble-up any genuine failure
         }
 
         /* ---------- 4) Respond with film + ratings ---------- */

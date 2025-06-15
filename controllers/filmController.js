@@ -460,8 +460,11 @@ export const getFilmDetails = async (req, res) => {
             ratings: ratingsResult.rows,
         });
     } catch (error) {
+        if (Number(error.code) === 404) {
+            throw error;          // bubble up to caller
+        }
         console.error('Error fetching film details:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 };
 

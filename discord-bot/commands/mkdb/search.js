@@ -35,15 +35,39 @@ module.exports = {
     const query = interaction.options.getString('query');
 
     /* ── call your backend search endpoint ───────────────────────────── */
-    const res   = await fetch(
+    const res = await fetch(
       `${MKDB_API_BASE}/films/search?query=${encodeURIComponent(query)}`
     );
+
+    // Try to parse JSON even when the status is not 200
+    let payload;
+    try {
+      payload = await res.json();
+    } catch {
+      payload = null;
+    }
+
     if (!res.ok) {
+      // Backend gave us a structured error
+      if (payload?.code === 'NO_LETTERBOXD_RESULT') {
+        return interaction.editReply(`🔍  No film found for \`${query}\`. Please check your spelling.`);
+      }
+      if (payload?.code === 'NOT_ON_MKDB') {
+        return interaction.editReply(
+          `We found a film, but it's not on MKDb. That means none of us have rated it yet. ` +
+          `Please try sending the command: \`!f ${query}\``
+        );
+      }
+      console.log('MKDb search error:', payload);
+      // Fallback for any other error
       return interaction.editReply('❌  Server error while searching.');
     }
-    const { film, slug } = await res.json();
+
+    // Successful response; destructure the expected payload
+    const { film, slug } = payload || {};
     if (!film) {
-      return interaction.editReply('🔍  No film found.');
+      // This should not happen, but guard just in case
+      return interaction.editReply('❌  Unexpected response from server.');
     }
 
     /* ── build rich embed ────────────────────────────────────────────── */
