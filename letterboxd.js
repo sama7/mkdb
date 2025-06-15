@@ -363,7 +363,7 @@ async function scrapeFilmDetails(browser, client) {
                     const posterElement = document.querySelector('img[width="230"][height="345"]');
                     const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
                     const synopsisElement = document.querySelector('meta[name="description"]');
-                    const yearElement = document.querySelector('div.releaseyear a');
+                    const yearElement = document.querySelector('span.releasedate a');
 
                     return {
                         posterUrl: posterElement ? posterElement.src : null,

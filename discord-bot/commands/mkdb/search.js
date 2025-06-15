@@ -49,7 +49,7 @@ module.exports = {
     /* ── build rich embed ────────────────────────────────────────────── */
     const embed = new EmbedBuilder()
       .setTitle(`${film.title} (${film.year ?? '—'})`)
-      .setURL(`${MKDB_API_BASE}/film/${slug}`)
+      .setURL(`${MKDB_BASE_URL}/film/${slug}`)
       .setDescription(film.synopsis ? truncateSynopsis(film.synopsis, 500) : '—')
       .setThumbnail(`https://mkdb.co/images/posters/${slug}.jpg`)
       .addFields(
