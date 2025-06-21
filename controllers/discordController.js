@@ -216,13 +216,13 @@ export const getFilmByRank = async (req, res) => {
 };
 
 /**
- * GET  /films/nearmank/:rank   (1 ≤ rank ≤ 50)
+ * GET  /films/nearmank/:rank   (1 ≤ rank ≤ 100)
  * Top-50 films by highest average ★ (≥ 7 ratings && ≤ 9 ratings)
  */
 export const getNearMankFilmByRank = async (req, res) => {
     const rank = Number(req.params.rank);
-    if (!Number.isInteger(rank) || rank < 1 || rank > 50) {
-        return res.status(400).json({ error: 'Rank must be between 1 and 50.' });
+    if (!Number.isInteger(rank) || rank < 1 || rank > 100) {
+        return res.status(400).json({ error: 'Rank must be between 1 and 100.' });
     }
 
     try {

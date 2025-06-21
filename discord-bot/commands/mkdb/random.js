@@ -35,8 +35,8 @@ module.exports = {
         apiPathBase  = '/films/rank/';       // existing endpoint
         break;
 
-      case 'nearmank':                // top‑50 high‑average films w/ 7‑9 ratings
-        topFilmScope = 50;
+      case 'nearmank':                // top‑100 high‑average films w/ 7‑9 ratings
+        topFilmScope = 100;
         apiPathBase  = '/films/nearmank/';   // **new** endpoint
         break;
 

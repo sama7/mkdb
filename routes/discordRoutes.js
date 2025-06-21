@@ -9,7 +9,7 @@ router.get('/films/search', discordController.searchFilm);
 // GET /api/discord/films/rank/:rank - Retrieve film details by rank
 router.get('/films/rank/:rank', discordController.getFilmByRank);
 
-// GET /api/discord/films/nearmank/:rank - Retrieve film details by near-mank rank (7-9 ratings, top 50)
+// GET /api/discord/films/nearmank/:rank - Retrieve film details by near-mank rank (7-9 ratings, top 100)
 router.get('/films/nearmank/:rank', discordController.getNearMankFilmByRank);
 
 // GET /api/discord/films/ratings - Retrieve film details and ratings by search query
