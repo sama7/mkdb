@@ -342,8 +342,10 @@ async function scrapeFilmDetails(browser, client) {
         // IGNORE BELOW CODE: for processing limited batch only
         /*
         const slugs = [
-            'harakiri',
-            'seven-samurai',
+            'silent-waters',
+            'the-text-of-light',
+            'the-matrix',
+            'the-longest-day',
         ];
         */
 
@@ -359,17 +361,20 @@ async function scrapeFilmDetails(browser, client) {
                 await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
 
                 // Extract the poster URL, TMDb URL, and synopsis
-                const { posterUrl, tmdbUrl, synopsis, year } = await page.evaluate(() => {
+                const { posterUrl, tmdbUrl, synopsis, year, runtime } = await page.evaluate(() => {
                     const posterElement = document.querySelector('img[width="230"][height="345"]');
                     const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
                     const synopsisElement = document.querySelector('meta[name="description"]');
                     const yearElement = document.querySelector('span.releasedate a');
+                    const footerText = document.querySelector('p.text-footer')?.innerText || '';
+                    const runtimeMatch = footerText.match(/(\d+)\s*mins/);
 
                     return {
                         posterUrl: posterElement ? posterElement.src : null,
                         tmdbUrl: tmdbElement ? tmdbElement.href : null,
                         synopsis: synopsisElement ? synopsisElement.content : null,
                         year: yearElement ? yearElement.textContent.trim() : null,
+                        runtime: runtimeMatch ? Number(runtimeMatch[1]) : null,
                     };
                 });
 
@@ -385,6 +390,24 @@ async function scrapeFilmDetails(browser, client) {
                 } catch (err) {
                     console.error(`Failed to fetch poster for ${slug}:`, err.message);
                 }
+
+                // ── directors ────────────────────────────────────────────────
+                const crewURL = `https://letterboxd.com/film/${slug}/crew/`;
+                let directors = [];
+                try {
+                    await safeGoto(page, crewURL);
+                    directors = await page.evaluate(() => {
+                        const header = Array.from(document.querySelectorAll('#tab-crew h3 span.crewrole'))
+                            .find(span => /Director/i.test(span.textContent));
+                        if (!header) return [];
+                        const listDiv = header.parentElement.nextElementSibling; // .text-sluglist
+                        return Array.from(listDiv.querySelectorAll('a.text-slug'))
+                            .map(a => a.textContent.trim());
+                    });
+                } catch (err) {
+                    console.error(`Failed to fetch directors for ${slug}:`, err.message);
+                }
+
                 // Now scrape the genres from the /genres/ page
                 const genresURL = `https://letterboxd.com/film/${slug}/genres/`;
                 let genres = [];
@@ -410,13 +433,56 @@ async function scrapeFilmDetails(browser, client) {
                     console.error(`Failed to fetch genres for ${slug}:`, err.message);
                 }
 
+                // ── details page (countries, languages) ──────────────
+                const detailsURL = `https://letterboxd.com/film/${slug}/details/`;
+                let countries = [], languages = [];
+                try {
+                    await safeGoto(page, detailsURL);
+
+                    ({ countries, languages } = await page.evaluate(() => {
+                        // helper that returns text[] from the div that follows an <h3><span>label</span>
+                        function grabList(labelRegex) {
+                            const span = Array.from(document.querySelectorAll('#tab-details h3 span'))
+                                .find(s => labelRegex.test(s.textContent));
+                            if (!span) return [];
+                            const listDiv = span.parentElement.nextElementSibling;
+                            return Array.from(listDiv.querySelectorAll('a.text-slug'))
+                                .map(a => a.textContent.trim());
+                        }
+
+                        const countries = grabList(/Countr/i);
+
+                        // languages: primary + spoken
+                        let languages = grabList(/^Language$/i);
+                        const primary = grabList(/Primary Language/i);
+                        const spoken = grabList(/Spoken Languages/i)
+                            .map(txt => txt.split(',')[0].trim());   // drop after first comma
+                        if (primary.length) languages = primary;
+                        spoken.forEach(l => { if (!languages.includes(l)) languages.push(l); });
+
+                        return { countries, languages };
+                    }));
+                } catch (err) {
+                    console.error(`Failed to fetch countries/languages details for ${slug}:`, err.message);
+                }
+
                 // Update the database with the TMDb URL, synopsis, and genres
                 try {
                     await client.query(
-                        `UPDATE films SET tmdb = $1, synopsis = $2, year = $3, genres = $4, time_modified = NOW() WHERE slug = $5`,
-                        [tmdbUrl, synopsis, year, genres, slug]
+                        `UPDATE films 
+                            SET tmdb = $1, 
+                                synopsis = $2, 
+                                year = $3,
+                                genres = $4,
+                                runtime = $5,
+                                directors = $6,
+                                countries = $7,
+                                languages = $8,
+                                time_modified = NOW() 
+                        WHERE slug = $9`,
+                        [tmdbUrl, synopsis, year, genres, runtime, directors, countries, languages, slug]
                     );
-                    console.log(`Updated film details and genres for ${slug}`);
+                    console.log(`Updated film details for ${slug}`);
                 } catch (err) {
                     console.error(`Failed to update details for ${slug}:`, err.stack);
                 }
@@ -538,7 +604,7 @@ async function main() {
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
         */
-       
+
         const finish = performance.now();
         const timeToScrape = (finish - start) / 1000;
         console.log(`Scraping of film ratings for all users took ${timeToScrape.toFixed(2)} seconds`);
