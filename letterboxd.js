@@ -10,6 +10,9 @@ import pg from 'pg';
 puppeteer.use(StealthPlugin());
 puppeteer.use(Adblocker({ blockTrackers: true }));
 
+// Default timeout (ms) when waiting for specific elements to appear
+const SELECTOR_TIMEOUT = 6000;   // 6 seconds
+
 async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
 
@@ -360,6 +363,9 @@ async function scrapeFilmDetails(browser, client) {
 
                 await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
 
+                // make sure runtime footer has rendered
+                await page.waitForSelector('p.text-footer', { timeout: SELECTOR_TIMEOUT }).catch(() => { });
+
                 // Extract the poster URL, TMDb URL, and synopsis
                 const { posterUrl, tmdbUrl, synopsis, year, runtime } = await page.evaluate(() => {
                     const posterElement = document.querySelector('img[width="230"][height="345"]');
@@ -367,7 +373,7 @@ async function scrapeFilmDetails(browser, client) {
                     const synopsisElement = document.querySelector('meta[name="description"]');
                     const yearElement = document.querySelector('span.releasedate a');
                     const footerText = document.querySelector('p.text-footer')?.innerText || '';
-                    const runtimeMatch = footerText.match(/(\d+)\s*mins/);
+                    const runtimeMatch = footerText.match(/(\d+)\s*min(?:s)?/);   // match "1 min" or "55 mins"
 
                     return {
                         posterUrl: posterElement ? posterElement.src : null,
@@ -396,6 +402,8 @@ async function scrapeFilmDetails(browser, client) {
                 let directors = [];
                 try {
                     await safeGoto(page, crewURL);
+                    // wait until the director list (text‑sluglist) is present or we bail out
+                    await page.waitForSelector('#tab-crew div.text-sluglist', { timeout: SELECTOR_TIMEOUT }).catch(() => { });
                     directors = await page.evaluate(() => {
                         const header = Array.from(document.querySelectorAll('#tab-crew h3 span.crewrole'))
                             .find(span => /Director/i.test(span.textContent));
@@ -413,6 +421,7 @@ async function scrapeFilmDetails(browser, client) {
                 let genres = [];
                 try {
                     await safeGoto(page, genresURL);
+                    await page.waitForSelector('#tab-genres div.text-sluglist', { timeout: SELECTOR_TIMEOUT });
 
                     // Extract genres from the page
                     genres = await page.evaluate(() => {
@@ -438,6 +447,8 @@ async function scrapeFilmDetails(browser, client) {
                 let countries = [], languages = [];
                 try {
                     await safeGoto(page, detailsURL);
+                    // ensure the details sluglist is loaded
+                    await page.waitForSelector('#tab-details div.text-sluglist', { timeout: SELECTOR_TIMEOUT }).catch(() => { });
 
                     ({ countries, languages } = await page.evaluate(() => {
                         // helper that returns text[] from the div that follows an <h3><span>label</span>
