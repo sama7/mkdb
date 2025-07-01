@@ -5,6 +5,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
+  escapeMarkdown,
 } = require('discord.js');
 
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
@@ -105,7 +106,7 @@ module.exports = {
       }
 
       return new EmbedBuilder()
-        .setTitle(`${film.title} (${film.year ?? '—'}) — Community ratings`)
+        .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'}) — Community ratings`)
         .setURL(`${MKDB_BASE_URL}/film/${slug}`)
         .setThumbnail(`https://mkdb.co/images/posters/${slug}.jpg`)
         .setDescription(slice.join('\n'))

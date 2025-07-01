@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, escapeMarkdown } = require('discord.js');
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
 const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
@@ -12,6 +12,19 @@ function truncateSynopsis(text, max = 500) {
   const slice = text.slice(0, max);
   const lastSpace = slice.lastIndexOf(' ');
   return (lastSpace > 0 ? slice.slice(0, lastSpace) : slice).trimEnd() + '…';
+}
+
+/**
+ * Convert runtime in minutes → “Hh Mm” / “Hh” / “Mm”.
+ * Returns empty string when runtime is nullish or 0.
+ */
+function formatRuntime(mins = 0) {
+  if (!mins) return '';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
 }
 
 module.exports = {
@@ -39,10 +52,33 @@ module.exports = {
     const { film } = await res.json();
     if (!film) return interaction.editReply('Rank not found in current top 1000.');
 
+    // Build description: directors → genres → countries → languages → runtime → synopsis
+    const descParts = [];
+
+    if (Array.isArray(film.directors) && film.directors.length) {
+      descParts.push(film.directors.join(', '));
+    }
+    if (Array.isArray(film.genres) && film.genres.length) {
+      descParts.push(film.genres.join(', '));
+    }
+    if (Array.isArray(film.countries) && film.countries.length) {
+      descParts.push(film.countries.join(', '));
+    }
+    if (Array.isArray(film.languages) && film.languages.length) {
+      descParts.push(film.languages.join(', '));
+    }
+    const rt = formatRuntime(film.runtime);
+    if (rt) descParts.push(rt);
+
+    if (film.synopsis) {
+      descParts.push('');
+      descParts.push(truncateSynopsis(film.synopsis, 500));
+    }
+
     const embed = new EmbedBuilder()
-      .setTitle(`${film.title} (${film.year ?? '—'})`)
+      .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'})`)
       .setURL(`${MKDB_BASE_URL}/film/${film.slug}`)
-      .setDescription(film.synopsis ? truncateSynopsis(film.synopsis, 500) : '—')
+      .setDescription(descParts.join('\n') || '—')
       .setThumbnail(`https://mkdb.co/images/posters/${film.slug}.jpg`)
       .addFields(
         { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },

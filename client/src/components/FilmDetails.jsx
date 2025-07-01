@@ -87,12 +87,41 @@ const FilmDetails = () => {
         return '★'.repeat(fullStars) + halfStar;
     };
 
+    // Convert runtime (minutes) to "Xh Ym" or "Xh" / "Ym"
+    const formatRuntime = (mins) => {
+        if (!mins) return null;
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        if (h && m) return `${h}h ${m}m`;
+        if (h)      return `${h}h`;
+        return `${m}m`;
+    };
+
     return (
         <div className="film-details container">
             <h3><i>{film.title}</i> ({film.year})</h3>
             <a href={`https://letterboxd.com/film/${slug}`} target="_blank" rel="noopener noreferrer">
                 <img className='film-poster' src={`/images/posters/${slug}.jpg`} alt={`${film.title} (${film.year})`} title={`${film.title} (${film.year})`} />
             </a>
+            {/* Directors, Genres, Countries, Languages, Runtime (compact) */}
+            {(() => {
+                const metaLines = [];
+                if (film.directors?.length) metaLines.push(film.directors.join(', '));
+                if (film.genres?.length)    metaLines.push(film.genres.join(', '));
+                if (film.countries?.length) metaLines.push(film.countries.join(', '));
+                if (film.languages?.length) metaLines.push(film.languages.join(', '));
+                if (film.runtime)           metaLines.push(formatRuntime(film.runtime));
+                return metaLines.length ? (
+                    <p className="film-meta">
+                        {metaLines.map((ln, i) => (
+                            <span key={i}>
+                                {ln}
+                                {i < metaLines.length - 1 && <br />}
+                            </span>
+                        ))}
+                    </p>
+                ) : null;
+            })()}
             <p>{film.synopsis}</p>
             {/* MKDb Rank */}
             <div className="rank-section">

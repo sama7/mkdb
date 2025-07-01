@@ -410,6 +410,11 @@ export const getFilmDetails = async (req, res) => {
             SELECT
                 f.title,
                 f.year,
+                f.directors,
+                f.genres,
+                f.countries,
+                f.languages,
+                f.runtime,
                 f.synopsis,
                 AVG(r.rating) AS average_rating,
                 COUNT(r.rating) AS rating_count,

@@ -41,7 +41,8 @@ h1 {
   margin-top: 1rem;
 }
 
-button, .genre-dropdown-button {
+button,
+.genre-dropdown-button {
   border-radius: 8px;
   border: 1px solid transparent;
   padding: 0.6em 1.2em;
@@ -55,7 +56,8 @@ button, .genre-dropdown-button {
   transition: border-color 0.25s;
 }
 
-button:hover, .genre-item:hover {
+button:hover,
+.genre-item:hover {
   border-color: #646cff;
 }
 
@@ -116,7 +118,8 @@ button:focus-visible {
   }
 }
 
-.film-not-found img, .member-not-found img {
+.film-not-found img,
+.member-not-found img {
   width: 30px;
   margin-left: 5px;
   vertical-align: middle;
@@ -142,7 +145,8 @@ button:focus-visible {
   vertical-align: middle;
 } */
 
-.film-details, .member-not-found {
+.film-details,
+.member-not-found {
   text-align: left;
   padding: 1rem;
 }
@@ -156,8 +160,13 @@ button:focus-visible {
   margin: 1rem 0;
 }
 
+.film-meta {
+  line-height: 1.4;
+  margin-bottom: 0.75rem;
+}
+
 .activity-link {
-  color: #c388fd;  
+  color: #c388fd;
   font-size: .7rem;
 }
 
@@ -237,7 +246,8 @@ button:focus-visible {
 .user-avatar {
   width: 40px;
   border-radius: 50%;
-  margin-right: 10px; /* Add space between avatar and username */
+  margin-right: 10px;
+  /* Add space between avatar and username */
   margin-top: 5px;
   margin-bottom: 5px;
 }
@@ -245,13 +255,15 @@ button:focus-visible {
 .user-avatar-large {
   width: 110px;
   border-radius: 50%;
-  margin-right: 10px; /* Add space between avatar and username */
+  margin-right: 10px;
+  /* Add space between avatar and username */
   margin-top: 5px;
   margin-bottom: 5px;
 }
 
 .user-list-item {
-  list-style: none; /* Remove bullet point */
+  list-style: none;
+  /* Remove bullet point */
 }
 
 ul.ratings-list li:last-child {
@@ -260,7 +272,8 @@ ul.ratings-list li:last-child {
 
 .user-info {
   display: flex;
-  align-items: center; /* Vertically align avatar and username */
+  align-items: center;
+  /* Vertically align avatar and username */
 }
 
 .username {
@@ -301,8 +314,10 @@ div.filters input {
 }
 
 ul.genre-dropdown {
-  list-style: none; /* Remove bullet points */
-  padding: 0; /* Remove padding */
+  list-style: none;
+  /* Remove bullet points */
+  padding: 0;
+  /* Remove padding */
   margin-top: 13.5px;
   margin-left: 8px;
 }
@@ -349,7 +364,8 @@ ul.genre-dropdown {
   border-radius: 4px;
   outline: none;
   cursor: pointer;
-  appearance: none; /* Removes default arrow */
+  appearance: none;
+  /* Removes default arrow */
 }
 
 .page-dropdown:focus {
@@ -357,7 +373,8 @@ ul.genre-dropdown {
 }
 
 .page-dropdown::after {
-  content: '▼'; /* Custom arrow */
+  content: '▼';
+  /* Custom arrow */
   font-size: 12px;
   color: #aaa;
   position: absolute;
@@ -383,7 +400,8 @@ div.tab-pane div h3 img {
   margin-left: 0.2em;
 }
 
-.icon-watched .icon, .watched-cell .icon {
+.icon-watched .icon,
+.watched-cell .icon {
   background-position: -410px -110px;
   height: 16px;
   width: 20px;
@@ -465,7 +483,8 @@ div.username-and-watched {
 .circle-inner {
   width: 3em;
   height: 3em;
-  background-color: #121212; /* Match your app's background */
+  background-color: #121212;
+  /* Match your app's background */
   border-radius: 50%;
   display: flex;
   justify-content: center;
@@ -483,6 +502,6 @@ div.username-and-watched {
   place-items: center;
 }
 
-.score-details div.circle-border{
+.score-details div.circle-border {
   margin-left: 1em;
 }
