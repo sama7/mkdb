@@ -11,7 +11,7 @@ puppeteer.use(StealthPlugin());
 puppeteer.use(Adblocker({ blockTrackers: true }));
 
 // Default timeout (ms) when waiting for specific elements to appear
-const SELECTOR_TIMEOUT = 6000;   // 6 seconds
+const SELECTOR_TIMEOUT = 12000;   // 12 seconds
 
 async function scrapeUsernames(browser, client) {
     const followingListURL = 'https://letterboxd.com/metrodb/following/';
