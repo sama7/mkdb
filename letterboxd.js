@@ -25,7 +25,7 @@ async function scrapeUsernames(browser, client) {
     // Loop through all pages
     while (true) {
         // Wait for the table to load
-        const followingTableExists = await page.$('table.person-table');
+        const followingTableExists = await page.$('table.member-table');
 
         if (!followingTableExists) {
             break; // Exit if no table is found
@@ -33,7 +33,7 @@ async function scrapeUsernames(browser, client) {
 
         // Get all usernames and avatar URLs on the current page
         const pageUsernamesAndAvatars = await page.evaluate(() => {
-            const rows = document.querySelectorAll('.person-table tbody tr');
+            const rows = document.querySelectorAll('.member-table tbody tr');
             const users = [];
 
             rows.forEach(row => {
