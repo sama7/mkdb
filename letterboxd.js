@@ -341,10 +341,30 @@ async function downloadImage(url, dest) {
 async function scrapeFilmDetails(browser, client) {
     const start = performance.now();
     try {
-        // Get all slugs from the films table
-        const { rows } = await client.query("SELECT slug FROM films ORDER BY film_id");
+        // Incremental scrape: only new films added in the recent lookback window
+        // or rows that are still missing any of the key details. Configure the
+        // lookback (in days) via DETAILS_LOOKBACK_DAYS; defaults to 7.
+        const lookbackDays = Number(process.env.DETAILS_LOOKBACK_DAYS || 7);
+        const { rows } = await client.query(
+            `
+            SELECT slug
+            FROM films
+            WHERE
+                time_created >= NOW() - ($1 || ' days')::interval
+                OR tmdb IS NULL
+                OR synopsis IS NULL
+                OR year IS NULL
+                OR runtime IS NULL
+                OR array_length(genres, 1) IS NULL
+                OR array_length(directors, 1) IS NULL
+                OR array_length(countries, 1) IS NULL
+                OR array_length(languages, 1) IS NULL
+            ORDER BY film_id DESC
+            `,
+            [lookbackDays]
+        );
         const slugs = rows.map(row => row.slug);
-        console.log(`Found ${slugs.length} films to scrape for details`);
+        console.log(`Found ${slugs.length} films to scrape (new in last ${lookbackDays}d or missing details)`);
 
         // IGNORE BELOW CODE: for processing limited batch only
         /*
