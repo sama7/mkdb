@@ -169,51 +169,55 @@ async function scrapeFilmRatings(browser, client, username) {
             await safeGoto(page, URL + i); // Using the safeGoto function, retries up to 6 times
 
             // Check if there are any films on the page
-            const filmsExist = await page.$('ul.poster-list');
+            const filmsExist = await page.$('ul.grid');
 
             if (!filmsExist) {
                 break;
             }
 
-            await page.waitForSelector('.film-poster[data-film-name]');
+            await page.waitForSelector('li.griditem div.react-component[data-item-name]');
 
             // Get the total number of films on the page
-            const filmElements = await page.$$('.poster-container');
+            const filmElements = await page.$$('li.griditem');
 
             // Helper function to wait for a non-null attribute with a retry mechanism
-            const waitForAttribute = async (element, attribute, maxRetries = 1) => {
-                const slug = await element.evaluate((el, attr) => el.getAttribute(attr), 'data-film-slug')
-                let value = null;
-                let attempt = 0;
+            const waitForAttribute = async (element, attribute, maxRetries = 3) => {
+              // Try to grab a stable identifier for logs
+              const slug = element
+                ? await element.evaluate(el => el.getAttribute('data-item-slug'))
+                : null;
+              let value = null;
+              let attempt = 0;
 
-                while (value === null && attempt < maxRetries) {
-                    value = await element.evaluate((el, attr) => el.getAttribute(attr), attribute);
-                    if (value === null) {
-                        attempt++;
-                        const delay = attempt * 500; // Increase delay with each retry (500ms, 1000ms, 1500ms, etc.)
-                        // console.log(`Attempt ${attempt}: ${attribute} not found for user '${username}' -> film '${slug}', retrying in ${delay}ms...`);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                }
-
+              while (value === null && attempt < maxRetries) {
+                value = await element?.evaluate((el, attr) => el.getAttribute(attr), attribute);
                 if (value === null) {
-                    console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug}' after ${maxRetries} attempts`);
+                  attempt++;
+                  const delay = attempt * 500; // 500ms, 1000ms, 1500ms…
+                  // console.log(`Attempt ${attempt}: ${attribute} not found for item '${debugHref ?? 'unknown'}', retrying in ${delay}ms...`);
+                  await new Promise(resolve => setTimeout(resolve, delay));
                 }
-                return value;
+              }
+
+              if (value === null) {
+                console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug ?? 'unknown'}' after ${maxRetries} attempts`);
+              }
+              return value;
             };
 
             // Iterate over each film and extract the required data
             for (const filmElement of filmElements) {
-                const titleElement = await filmElement.$('.film-poster');
+                const poster = await filmElement.$('div.react-component[data-component-class*="LazyPoster"]');
 
                 // Wait for non-null values
-                const title = await waitForAttribute(titleElement, 'data-film-name');
+                const title = await waitForAttribute(poster, 'data-item-name', 3);
                 if (title === null) {
-                    i--;
-                    console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
-                    break;
+                  i--;
+                  console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
+                  break;
                 }
-                const permalink = await filmElement.$eval('.film-poster', el => el.getAttribute('data-film-slug'));
+
+                const permalink = await filmElement.$eval('div.react-component[data-component-class*="LazyPoster"]', el => el.getAttribute('data-item-slug'));
 
                 // Wait for the "rated-x" class to appear within the "poster-viewingdata" element
                 const ratingClass = await filmElement.$eval('.poster-viewingdata span[class*="rated-"]', el => {
@@ -228,7 +232,7 @@ async function scrapeFilmRatings(browser, client, username) {
                     rating = ratingValue / 2; // Convert to actual rating (e.g., 10 -> 5.0)
                 }
 
-                // Push the extracted data into the films array ()
+                // Push the extracted data into the films array
                 films.push({ title, rating, permalink });
 
                 // Insert or update film in the database
