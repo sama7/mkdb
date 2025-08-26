@@ -182,27 +182,27 @@ async function scrapeFilmRatings(browser, client, username) {
 
             // Helper function to wait for a non-null attribute with a retry mechanism
             const waitForAttribute = async (element, attribute, maxRetries = 3) => {
-              // Try to grab a stable identifier for logs
-              const slug = element
-                ? await element.evaluate(el => el.getAttribute('data-item-slug'))
-                : null;
-              let value = null;
-              let attempt = 0;
+                // Try to grab a stable identifier for logs
+                const slug = element
+                    ? await element.evaluate(el => el.getAttribute('data-item-slug'))
+                    : null;
+                let value = null;
+                let attempt = 0;
 
-              while (value === null && attempt < maxRetries) {
-                value = await element?.evaluate((el, attr) => el.getAttribute(attr), attribute);
-                if (value === null) {
-                  attempt++;
-                  const delay = attempt * 500; // 500ms, 1000ms, 1500ms…
-                  // console.log(`Attempt ${attempt}: ${attribute} not found for item '${debugHref ?? 'unknown'}', retrying in ${delay}ms...`);
-                  await new Promise(resolve => setTimeout(resolve, delay));
+                while (value === null && attempt < maxRetries) {
+                    value = await element?.evaluate((el, attr) => el.getAttribute(attr), attribute);
+                    if (value === null) {
+                        attempt++;
+                        const delay = attempt * 500; // 500ms, 1000ms, 1500ms…
+                        // console.log(`Attempt ${attempt}: ${attribute} not found for item '${debugHref ?? 'unknown'}', retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
                 }
-              }
 
-              if (value === null) {
-                console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug ?? 'unknown'}' after ${maxRetries} attempts`);
-              }
-              return value;
+                if (value === null) {
+                    console.warn(`Warning: Attribute ${attribute} was not found for user '${username}' -> film '${slug ?? 'unknown'}' after ${maxRetries} attempts`);
+                }
+                return value;
             };
 
             // Iterate over each film and extract the required data
@@ -212,9 +212,9 @@ async function scrapeFilmRatings(browser, client, username) {
                 // Wait for non-null values
                 const title = await waitForAttribute(poster, 'data-item-name', 3);
                 if (title === null) {
-                  i--;
-                  console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
-                  break;
+                    i--;
+                    console.log(`Retrying Page ${i + 1} of ${totalPages} for user '${username}'`);
+                    break;
                 }
 
                 const permalink = await filmElement.$eval('div.react-component[data-component-class*="LazyPoster"]', el => el.getAttribute('data-item-slug'));
@@ -551,6 +551,106 @@ async function scrapeFilmDetails(browser, client) {
     }
 }
 
+async function scrapeEmptyPosters(browser, client) {
+    const start = performance.now();
+    try {
+        // ───────────────────── Re-scrape zero-byte poster files ─────────────────────
+        {
+            const posterDir = path.resolve('./images/posters');
+            let zeroByteSlugs = [];
+
+            // 1) Find poster files that exist but are 0 bytes
+            try {
+                const files = await fs.promises.readdir(posterDir);
+                for (const file of files) {
+                    if (!file.endsWith('.jpg')) continue;
+                    const filePath = path.join(posterDir, file);
+                    const stat = await fs.promises.stat(filePath).catch(() => null);
+                    if (stat && stat.size === 0) {
+                        zeroByteSlugs.push(path.basename(file, '.jpg')); // strip .jpg → slug
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not scan poster directory:', e.message);
+            }
+
+            // 2) Keep only slugs that actually exist in the DB
+            if (zeroByteSlugs.length) {
+                const { rows: ok } = await client.query(
+                    'SELECT slug FROM films WHERE slug = ANY($1::text[])',
+                    [zeroByteSlugs]
+                );
+                zeroByteSlugs = ok.map(r => r.slug);
+            }
+
+            if (!zeroByteSlugs.length) {
+                console.log('No zero-byte posters found to retry.');
+            } else {
+                console.log(`Retrying posters for ${zeroByteSlugs.length} films with 0-byte images…`);
+                const posterConcurrency = 15; // tune as you like
+
+                // 3) Retry in small batches
+                for (let i = 0; i < zeroByteSlugs.length; i += posterConcurrency) {
+                    const batch = zeroByteSlugs.slice(i, i + posterConcurrency);
+                    await Promise.all(batch.map(async (slug) => {
+                        const page = await browser.newPage();
+                        try {
+                            await safeGoto(page, `https://letterboxd.com/film/${slug}/`);
+                            // Wait (softly) for a poster candidate to render
+                            await page
+                                .waitForSelector('img[width="230"][height="345"], .film-poster img, #poster img', { timeout: SELECTOR_TIMEOUT })
+                                .catch(() => { });
+
+                            // Grab a robust poster src (fallbacks included)
+                            const posterUrl = await page.evaluate(() => {
+                                const sels = [
+                                    'img[width="230"][height="345"]',
+                                    '.film-poster img',
+                                    '#poster img',
+                                    'img.image[alt]'
+                                ];
+                                for (const sel of sels) {
+                                    const el = document.querySelector(sel);
+                                    if (el) return el.currentSrc || el.src;
+                                }
+                                return null;
+                            });
+
+                            if (posterUrl) {
+                                const dest = path.resolve(`./images/posters/${slug}.jpg`);
+                                await downloadImage(posterUrl, dest);
+
+                                // Verify we got a non-empty file this time
+                                const stat = await fs.promises.stat(dest).catch(() => null);
+                                if (stat && stat.size > 0) {
+                                    console.log(`Re-downloaded poster for ${slug} (${stat.size} bytes)`);
+                                } else {
+                                    console.warn(`Poster for ${slug} is still empty after retry`);
+                                }
+                            } else {
+                                console.warn(`No poster element found for ${slug}`);
+                            }
+                        } catch (e) {
+                            console.warn(`Poster retry failed for ${slug}: ${e.message}`);
+                        } finally {
+                            await page.close();
+                        }
+                    }));
+
+                    // small breather between batches
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────────────
+    } catch (error) {
+        console.error('Error scraping empty posters:', error);
+        const finish = performance.now();
+        const timeToScrape = (finish - start) / 1000;
+        console.log(`Errored out after ${timeToScrape.toFixed(2)} seconds`);
+    }
+}
+
 async function main() {
     const start = performance.now();
     const dbUser = process.env.DB_USER || process.env.DEV_DB_USER;
@@ -645,6 +745,7 @@ async function main() {
         console.log(`Scraping of film ratings for all users took ${timeToScrape.toFixed(2)} seconds`);
 
         await scrapeFilmDetails(browser, client);
+        await scrapeEmptyPosters(browser, client);
         return;
     } catch (error) {
         console.error(`Error in main(): ${error}`);
