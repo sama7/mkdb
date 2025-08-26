@@ -566,7 +566,7 @@ async function scrapeEmptyPosters(browser, client) {
                     if (!file.endsWith('.jpg')) continue;
                     const filePath = path.join(posterDir, file);
                     const stat = await fs.promises.stat(filePath).catch(() => null);
-                    if (stat && stat.size === 0) {
+                    if (!stat && stat.size <= 118) {
                         zeroByteSlugs.push(path.basename(file, '.jpg')); // strip .jpg → slug
                     }
                 }
