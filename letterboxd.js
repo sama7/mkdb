@@ -343,22 +343,14 @@ async function scrapeFilmDetails(browser, client) {
     try {
         // Incremental scrape: only new films added in the recent lookback window
         // or rows that are still missing any of the key details. Configure the
-        // lookback (in days) via DETAILS_LOOKBACK_DAYS; defaults to 7.
-        const lookbackDays = Number(process.env.DETAILS_LOOKBACK_DAYS || 7);
+        // lookback (in days) via DETAILS_LOOKBACK_DAYS; defaults to 9.
+        const lookbackDays = Number(process.env.DETAILS_LOOKBACK_DAYS || 9);
         const { rows } = await client.query(
             `
             SELECT slug
             FROM films
             WHERE
                 time_created >= NOW() - ($1 || ' days')::interval
-                OR tmdb IS NULL
-                OR synopsis IS NULL
-                OR year IS NULL
-                OR runtime IS NULL
-                OR array_length(genres, 1) IS NULL
-                OR array_length(directors, 1) IS NULL
-                OR array_length(countries, 1) IS NULL
-                OR array_length(languages, 1) IS NULL
             ORDER BY film_id DESC
             `,
             [lookbackDays]
@@ -387,25 +379,52 @@ async function scrapeFilmDetails(browser, client) {
 
                 await safeGoto(page, URL);  // Using the safeGoto function, retries up to 6 times
 
-                // make sure runtime footer has rendered
-                await page.waitForSelector('p.text-footer', { timeout: SELECTOR_TIMEOUT }).catch(() => { });
+                // ensure the poster image under the film-poster container has rendered (soft wait)
+                await page
+                  .waitForSelector('div.film-poster img[width="230"][height="345"]', { timeout: SELECTOR_TIMEOUT })
+                  .catch(() => { });
+                // make sure runtime footer has rendered (soft wait)
+                await page
+                  .waitForSelector('p.text-footer', { timeout: SELECTOR_TIMEOUT })
+                  .catch(() => { });
 
-                // Extract the poster URL, TMDb URL, and synopsis
-                const { posterUrl, tmdbUrl, synopsis, year, runtime } = await page.evaluate(() => {
-                    const posterElement = document.querySelector('img[width="230"][height="345"]');
-                    const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
-                    const synopsisElement = document.querySelector('meta[name="description"]');
-                    const yearElement = document.querySelector('span.releasedate a');
-                    const footerText = document.querySelector('p.text-footer')?.innerText || '';
-                    const runtimeMatch = footerText.match(/(\d+)\s*min(?:s)?/);   // match "1 min" or "55 mins"
+                // Try multiple times to obtain a real, non-placeholder poster URL
+                const MAX_POSTER_RETRIES = 4;
+                let posterUrl = null;
+                const tryGetPoster = async () => {
+                  return page.evaluate(() => {
+                    const el = document.querySelector('div.film-poster img[width="230"][height="345"]');
+                    if (!el) return null;
+                    const src = el.currentSrc || el.src || null;
+                    const ok =
+                      el.complete &&
+                      el.naturalWidth > 1 &&
+                      src &&
+                      !/empty-poster/i.test(src);
+                    return ok ? src : null;
+                  });
+                };
+                for (let attempt = 1; attempt <= MAX_POSTER_RETRIES; attempt++) {
+                  posterUrl = await tryGetPoster();
+                  if (posterUrl) break;
+                  // small backoff before trying again
+                  const delay = 700 * attempt; // 700ms, 1400ms, 2100ms, 2800ms
+                  await new Promise(r => setTimeout(r, delay));
+                }
 
-                    return {
-                        posterUrl: posterElement ? posterElement.src : null,
-                        tmdbUrl: tmdbElement ? tmdbElement.href : null,
-                        synopsis: synopsisElement ? synopsisElement.content : null,
-                        year: yearElement ? yearElement.textContent.trim() : null,
-                        runtime: runtimeMatch ? Number(runtimeMatch[1]) : null,
-                    };
+                // Extract TMDb URL, synopsis, year, runtime (independent of poster retry)
+                const { tmdbUrl, synopsis, year, runtime } = await page.evaluate(() => {
+                  const tmdbElement = document.querySelector('a[href^="https://www.themoviedb.org/"]');
+                  const synopsisElement = document.querySelector('meta[name="description"]');
+                  const yearElement = document.querySelector('span.releasedate a');
+                  const footerText = document.querySelector('p.text-footer')?.innerText || '';
+                  const runtimeMatch = footerText.match(/(\d+)\s*min(?:s)?/);   // match "1 min" or "55 mins"
+                  return {
+                    tmdbUrl: tmdbElement ? tmdbElement.href : null,
+                    synopsis: synopsisElement ? synopsisElement.content : null,
+                    year: yearElement ? yearElement.textContent.trim() : null,
+                    runtime: runtimeMatch ? Number(runtimeMatch[1]) : null,
+                  };
                 });
 
                 try {
@@ -596,24 +615,18 @@ async function scrapeEmptyPosters(browser, client) {
                         const page = await browser.newPage();
                         try {
                             await safeGoto(page, `https://letterboxd.com/film/${slug}/`);
-                            // Wait (softly) for a poster candidate to render
+                            // Wait (softly) for the strict poster candidate to render
                             await page
-                                .waitForSelector('img[width="230"][height="345"], .film-poster img, #poster img', { timeout: SELECTOR_TIMEOUT })
+                                .waitForSelector('div.film-poster img[width="230"][height="345"]', { timeout: SELECTOR_TIMEOUT })
                                 .catch(() => { });
 
-                            // Grab a robust poster src (fallbacks included)
+                            // Grab a robust poster src (stricter check)
                             const posterUrl = await page.evaluate(() => {
-                                const sels = [
-                                    'img[width="230"][height="345"]',
-                                    '.film-poster img',
-                                    '#poster img',
-                                    'img.image[alt]'
-                                ];
-                                for (const sel of sels) {
-                                    const el = document.querySelector(sel);
-                                    if (el) return el.currentSrc || el.src;
-                                }
-                                return null;
+                                const el = document.querySelector('div.film-poster img[width="230"][height="345"]');
+                                if (!el) return null;
+                                const src = el.currentSrc || el.src || null;
+                                const ok = el.complete && el.naturalWidth > 1 && src && !/empty-poster/i.test(src);
+                                return ok ? src : null;
                             });
 
                             if (posterUrl) {
