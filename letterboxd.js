@@ -408,7 +408,7 @@ async function scrapeFilmDetails(browser, client) {
                   posterUrl = await tryGetPoster();
                   if (posterUrl) break;
                   // small backoff before trying again
-                  const delay = 700 * attempt; // 700ms, 1400ms, 2100ms, 2800ms
+                  const delay = 1000 * attempt; // 1s, 2s, 3s, 4s
                   await new Promise(r => setTimeout(r, delay));
                 }
 
@@ -573,94 +573,112 @@ async function scrapeFilmDetails(browser, client) {
 async function scrapeEmptyPosters(browser, client) {
     const start = performance.now();
     try {
-        // ───────────────────── Re-scrape zero-byte poster files ─────────────────────
-        {
-            const posterDir = path.resolve('./images/posters');
-            let zeroByteSlugs = [];
+        // Find poster files that are tiny/empty and that correspond to slugs that exist in DB
+        const posterDir = path.resolve('./images/posters');
+        let candidateSlugs = [];
 
-            // 1) Find poster files that exist but are 0 bytes
-            try {
-                const files = await fs.promises.readdir(posterDir);
-                for (const file of files) {
-                    if (!file.endsWith('.jpg')) continue;
-                    const filePath = path.join(posterDir, file);
-                    const stat = await fs.promises.stat(filePath).catch(() => null);
-                    if (!stat && stat.size <= 118) {
-                        zeroByteSlugs.push(path.basename(file, '.jpg')); // strip .jpg → slug
-                    }
-                }
-            } catch (e) {
-                console.warn('Could not scan poster directory:', e.message);
-            }
-
-            // 2) Keep only slugs that actually exist in the DB
-            if (zeroByteSlugs.length) {
-                const { rows: ok } = await client.query(
-                    'SELECT slug FROM films WHERE slug = ANY($1::text[])',
-                    [zeroByteSlugs]
-                );
-                zeroByteSlugs = ok.map(r => r.slug);
-            }
-
-            if (!zeroByteSlugs.length) {
-                console.log('No zero-byte posters found to retry.');
-            } else {
-                console.log(`Retrying posters for ${zeroByteSlugs.length} films with 0-byte images…`);
-                const posterConcurrency = 15; // tune as you like
-
-                // 3) Retry in small batches
-                for (let i = 0; i < zeroByteSlugs.length; i += posterConcurrency) {
-                    const batch = zeroByteSlugs.slice(i, i + posterConcurrency);
-                    await Promise.all(batch.map(async (slug) => {
-                        const page = await browser.newPage();
-                        try {
-                            await safeGoto(page, `https://letterboxd.com/film/${slug}/`);
-                            // Wait (softly) for the strict poster candidate to render
-                            await page
-                                .waitForSelector('div.film-poster img[width="230"][height="345"]', { timeout: SELECTOR_TIMEOUT })
-                                .catch(() => { });
-
-                            // Grab a robust poster src (stricter check)
-                            const posterUrl = await page.evaluate(() => {
-                                const el = document.querySelector('div.film-poster img[width="230"][height="345"]');
-                                if (!el) return null;
-                                const src = el.currentSrc || el.src || null;
-                                const ok = el.complete && el.naturalWidth > 1 && src && !/empty-poster/i.test(src);
-                                return ok ? src : null;
-                            });
-
-                            if (posterUrl) {
-                                const dest = path.resolve(`./images/posters/${slug}.jpg`);
-                                await downloadImage(posterUrl, dest);
-
-                                // Verify we got a non-empty file this time
-                                const stat = await fs.promises.stat(dest).catch(() => null);
-                                if (stat && stat.size > 0) {
-                                    console.log(`Re-downloaded poster for ${slug} (${stat.size} bytes)`);
-                                } else {
-                                    console.warn(`Poster for ${slug} is still empty after retry`);
-                                }
-                            } else {
-                                console.warn(`No poster element found for ${slug}`);
-                            }
-                        } catch (e) {
-                            console.warn(`Poster retry failed for ${slug}: ${e.message}`);
-                        } finally {
-                            await page.close();
-                        }
-                    }));
-
-                    // small breather between batches
-                    await new Promise(r => setTimeout(r, 500));
+        // 1) Scan poster directory for tiny files (<=118 bytes)
+        try {
+            const files = await fs.promises.readdir(posterDir);
+            for (const file of files) {
+                if (!file.endsWith('.jpg')) continue;
+                const fp = path.join(posterDir, file);
+                const stat = await fs.promises.stat(fp).catch(() => null);
+                if (stat && stat.size <= 118) {
+                    candidateSlugs.push(path.basename(file, '.jpg'));
                 }
             }
+        } catch (e) {
+            console.warn('Could not scan poster directory:', e.message);
         }
-        // ─────────────────────────────────────────────────────────────────────────────
+
+        // 2) Keep only slugs that actually exist in the DB
+        if (candidateSlugs.length) {
+            const { rows } = await client.query(
+                'SELECT slug FROM films WHERE slug = ANY($1::text[])',
+                [candidateSlugs]
+            );
+            candidateSlugs = rows.map(r => r.slug);
+        }
+
+        if (!candidateSlugs.length) {
+            console.log('No zero–byte posters found to retry.');
+            return;
+        }
+
+        console.log(`Retrying ${candidateSlugs.length} poster(s) that are empty…`);
+        const concurrency = 15; // moderate parallelism
+
+        for (let i = 0; i < candidateSlugs.length; i += concurrency) {
+            const batch = candidateSlugs.slice(i, i + concurrency);
+            await Promise.all(batch.map(async (slug) => {
+                const page = await browser.newPage();
+                try {
+                    await safeGoto(page, `https://letterboxd.com/film/${slug}/`);
+
+                    // Soft waits: ensure the target poster node and footer have rendered
+                    await page
+                        .waitForSelector('div.film-poster img[width="230"][height="345"]', { timeout: SELECTOR_TIMEOUT })
+                        .catch(() => {});
+                    await page
+                        .waitForSelector('p.text-footer', { timeout: SELECTOR_TIMEOUT })
+                        .catch(() => {});
+
+                    // === Same resilient poster retrieval logic as scrapeFilmDetails() ===
+                    const MAX_POSTER_RETRIES = 4;
+                    const tryGetPoster = async () => {
+                        return page.evaluate(() => {
+                            const el = document.querySelector('div.film-poster img[width="230"][height="345"]');
+                            if (!el) return null;
+                            const src = el.currentSrc || el.src || null;
+                            const ok = el.complete && el.naturalWidth > 1 && src && !/empty-poster/i.test(src);
+                            return ok ? src : null;
+                        });
+                    };
+
+                    let posterUrl = null;
+                    for (let attempt = 1; attempt <= MAX_POSTER_RETRIES; attempt++) {
+                        posterUrl = await tryGetPoster();
+                        if (posterUrl) break;
+                        await new Promise(r => setTimeout(r, attempt * 1000)); // 1s, 2s, 3s, 4s
+                    }
+
+                    if (!posterUrl) {
+                        console.warn(`No valid poster located for ${slug}`);
+                        return;
+                    }
+
+                    const dest = path.resolve(`./images/posters/${slug}.jpg`);
+                    await downloadImage(posterUrl, dest);
+
+                    // Verify we actually downloaded a non-empty file this time
+                    const stat = await fs.promises.stat(dest).catch(() => null);
+                    if (stat && stat.size > 118) {
+                        console.log(`Re-downloaded poster for ${slug} (${stat.size} bytes)`);
+                    } else {
+                        console.warn(`Poster for ${slug} still too small after retry (${stat?.size ?? 0} bytes)`);
+                    }
+                } catch (e) {
+                    console.warn(`Poster retry failed for ${slug}: ${e.message}`);
+                } finally {
+                    await page.close();
+                }
+            }));
+
+            // Add a small delay after each batch of 30 completes
+            console.log(`Processed ${i + batch.length} of ${candidateSlugs.length} empty posters. Adding a delay...`);
+            const delay = Math.floor(Math.random() * 2000) + 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        const finish = performance.now();
+        const secs = (finish - start) / 1000;
+        console.log(`Finished retrying empty posters in ${secs.toFixed(2)}s`);
     } catch (error) {
         console.error('Error scraping empty posters:', error);
         const finish = performance.now();
-        const timeToScrape = (finish - start) / 1000;
-        console.log(`Errored out after ${timeToScrape.toFixed(2)} seconds`);
+        const secs = (finish - start) / 1000;
+        console.log(`Errored out after ${secs.toFixed(2)} seconds`);
     }
 }
 
