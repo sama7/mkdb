@@ -30,7 +30,7 @@ export const searchFilm = async (req, res) => {
 
         /* ---------- 2) Parse and extract first film slug ---------- */
         const $ = cheerio.load(html);
-        const slug = $('div[data-type="film"][data-film-slug]').first().attr('data-film-slug');
+        const slug = $('div[data-item-slug]').first().attr('data-item-slug');
 
         if (!slug) {
             // Nothing came back from Letterboxd
@@ -109,7 +109,7 @@ export const searchFilmRatings = async (req, res) => {
 
         /* ---------- 2) Parse and extract first film slug ---------- */
         const $ = cheerio.load(html);
-        const slug = $('div[data-type="film"][data-film-slug]').first().attr('data-film-slug');
+        const slug = $('div[data-item-slug]').first().attr('data-item-slug');
 
         if (!slug) {
             // Nothing came back from Letterboxd
