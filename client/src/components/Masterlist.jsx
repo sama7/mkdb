@@ -50,6 +50,11 @@ export default function Masterlist() {
             <hr />
 
             <p>
+                <a href={"https://letterboxd.com/focus/list/metropolis-top-50-films-under-10k-views-v2/"} target="_blank" rel="noopener noreferrer">
+                    Top 50 Under 10k [v2]
+                </a>
+            </p>
+            <p>
                 <a href={"https://letterboxd.com/uuni/list/metropolis-top-50-100-under-10k-1/"} target="_blank" rel="noopener noreferrer">
                     Top 100 under 10k Views
                 </a>
