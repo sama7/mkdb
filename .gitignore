@@ -23,6 +23,9 @@ client/dist
 client/dist-ssr
 client/*.local
 
+# Claude Code internal state
+.claude/
+
 # Editor directories and files
 client/.vscode/*
 client/!.vscode/extensions.json

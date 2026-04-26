@@ -1,14 +1,26 @@
-import * as cheerio from 'cheerio';
 import 'dotenv/config';
 import pool from '../db/conn.js';
-import { getFilmDetails } from './filmController.js';   // <- existing method
+import { getFilmDetails } from './filmController.js';
+import { apiRequest } from '../sync/lbx-client.js';
+
+function slugFromLink(link) {
+    if (!link) return null;
+    const m = link.match(/\/film\/([^/]+)\/?/);
+    return m ? m[1].toLowerCase() : null;
+}
+
+async function searchSlug(rawQuery) {
+    const j = await apiRequest('GET', '/search', {
+        query: { input: rawQuery, include: 'FilmSearchItem', perPage: '1' },
+    });
+    return slugFromLink(j.items?.[0]?.film?.link);
+}
 
 /** ──────────────────────────────────────────────────────────────────────────
  * /api/discord/films/search?query=<text>
- * 1. take the raw query exactly as sent
- * 2. fetch Letterboxd’s HTML search endpoint (no Puppeteer)
- * 3. pick first film result → slug (data‑film‑slug attr)
- * 4. delegate to getFilmDetails(slug)
+ * 1. hit the official Letterboxd API search endpoint
+ * 2. pick first film result → slug
+ * 3. delegate to getFilmDetails(slug)
  * ────────────────────────────────────────────────────────────────────────── */
 export const searchFilm = async (req, res) => {
     const rawQuery = String(req.query.query ?? '');
@@ -17,37 +29,23 @@ export const searchFilm = async (req, res) => {
         return res.status(400).json({ error: 'Query is required.' });
     }
 
-    const encoded = encodeURIComponent(rawQuery);
-    const url = `https://letterboxd.com/s/search/${encoded}/?adult`;
-
     try {
-        /* ---------- 1) Fetch the HTML of the search results ---------- */
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Letterboxd returned ${response.status}`);
-        }
-        const html = await response.text();
-
-        /* ---------- 2) Parse and extract first film slug ---------- */
-        const $ = cheerio.load(html);
-        const slug = $('div[data-item-slug]').first().attr('data-item-slug');
+        const slug = await searchSlug(rawQuery);
 
         if (!slug) {
-            // Nothing came back from Letterboxd
             return res
                 .status(404)
                 .json({ code: 'NO_LETTERBOXD_RESULT', message: 'No film found.' });
         }
 
-        /* ---------- 3) Re‑use getFilmDetails(slug) ---------- */
         const fakeReq = { params: { slug } };
 
-        let detailsPayload;          // will hold { film, ratings? }
+        let detailsPayload;
 
         const fakeRes = {
             json: (p) => { detailsPayload = p; },
             status: (code) => ({
-                json: (p) => { throw { code, payload: p }; },   // propagate status
+                json: (p) => { throw { code, payload: p }; },
             }),
         };
 
@@ -56,9 +54,6 @@ export const searchFilm = async (req, res) => {
         } catch (err) {
             console.log('Error in getFilmDetails:', err);
 
-            // ── FILM EXISTS ON LETTERBOXD BUT NOT ON MKDb ────────────────
-            // getFilmDetails turns our internal 404 into its own 500
-            // so we have to look for that pattern here.
             const notFound =
                 (Number(err.code) === 404) ||
                 (Number(err.code) === 500 && err.payload?.error === 'Film not found');
@@ -73,7 +68,6 @@ export const searchFilm = async (req, res) => {
             throw err;
         }
 
-        /* ---------- 4) Return slug + film (same shape as before) ----- */
         return res.json({
             slug,
             film: detailsPayload.film,
@@ -85,8 +79,8 @@ export const searchFilm = async (req, res) => {
 };
 
 /**
- * GET /api//discord/films/ratings?query=<title>
- * – Finds a film by Letterboxd search and returns:
+ * GET /api/discord/films/ratings?query=<title>
+ * – Finds a film by Letterboxd API search and returns:
  *   { slug, film, ratings }
  */
 export const searchFilmRatings = async (req, res) => {
@@ -96,46 +90,27 @@ export const searchFilmRatings = async (req, res) => {
         return res.status(400).json({ error: 'Query is required.' });
     }
 
-    const encoded = encodeURIComponent(rawQuery);
-    const url = `https://letterboxd.com/s/search/${encoded}/?adult`;
-
     try {
-        /* ---------- 1) Fetch the HTML of the search results ---------- */
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Letterboxd returned ${response.status}`);
-        }
-        const html = await response.text();
-
-        /* ---------- 2) Parse and extract first film slug ---------- */
-        const $ = cheerio.load(html);
-        const slug = $('div[data-item-slug]').first().attr('data-item-slug');
+        const slug = await searchSlug(rawQuery);
 
         if (!slug) {
-            // Nothing came back from Letterboxd
             return res
                 .status(404)
                 .json({ code: 'NO_LETTERBOXD_RESULT', message: 'No film found.' });
         }
 
-        /* ---------- 3) Re‑use getFilmDetails() ---------- */
         const fakeReq = { params: { slug } };
         let details;
         const fakeRes = {
-            json: (payload) => {
-                details = payload; // { film, ratings }
-            },
+            json: (payload) => { details = payload; },
             status: (code) => ({
-                json: (payload) => {
-                    throw { code, payload }; // bubble‐up errors
-                },
+                json: (payload) => { throw { code, payload }; },
             }),
         };
 
         try {
             await getFilmDetails(fakeReq, fakeRes);
         } catch (err) {
-            // ── FILM EXISTS ON LBx BUT NOT ON MKDb ───────────────────
             const notFound =
                 (Number(err.code) === 404) ||
                 (Number(err.code) === 500 && err.payload?.error === 'Film not found');
@@ -147,14 +122,13 @@ export const searchFilmRatings = async (req, res) => {
                     message: 'Film exists on Letterboxd but not on MKDb.',
                 });
             }
-            throw err;           // bubble-up any genuine failure
+            throw err;
         }
 
-        /* ---------- 4) Respond with film + ratings ---------- */
         return res.json({
             slug,
-            film: details.film,         // { title, year, synopsis, current_rank, … }
-            ratings: details.ratings,   // [{ username, display_name, rating }, …]
+            film: details.film,
+            ratings: details.ratings,
         });
     } catch (err) {
         console.error('Error in /films/ratings:', err);
