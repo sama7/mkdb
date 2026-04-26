@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import pool from '../db/conn.js';
 import { discoverMembers } from './discover-members.js';
 import { syncAllRatings } from './sync-ratings.js';
