@@ -26,7 +26,7 @@ function formatDuration(ms) {
 
 async function main() {
     const t0 = Date.now();
-    console.log(`[sync] start at ${new Date().toISOString()}`);
+    console.log(`[sync] start at ${new Date().toLocaleString('en-US', { timeZone: 'America/New_York', hour12: true })} EDT`);
 
     await pool.query('TRUNCATE TABLE ratings_stg; TRUNCATE TABLE users_stg CASCADE;');
     console.log('[sync] staging tables cleared');
