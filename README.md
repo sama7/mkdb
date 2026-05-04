@@ -2,7 +2,7 @@
 
 A film-ranking site for the **Metropolis** Letterboxd community on Discord. Live at **[mkdb.co](https://mkdb.co)**.
 
-mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterboxd.com/metrodb/) account follows, computes pairwise user-similarity scores from rating overlap, and produces a community ranking that updates every Sunday. Members can browse top films, week-over-week risers/fallers/new-entries, and "neighbor" pages comparing two members' tastes side-by-side.
+mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterboxd.com/metrodb/) account follows, computes pairwise user-similarity scores from rating overlap, and produces a community ranking that updates every Monday. Members can browse top films, week-over-week risers/fallers/new-entries, and "neighbor" pages comparing two members' tastes side-by-side.
 
 ## How it works
 
@@ -115,7 +115,7 @@ The frontend deep-links — `/film/:slug`, `/members/:username`, `/members/:a/:b
 
 ## Weekly sync
 
-Manual cadence (Sunday night). The orchestrator runs all four stages in order; `sync/index.js` truncates staging at the start so the run is self-contained.
+Manual cadence (Sunday night into Monday). The orchestrator runs all four stages in order; `sync/index.js` truncates staging at the start so the run is self-contained.
 
 ```bash
 # Locally
