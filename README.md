@@ -84,9 +84,10 @@ DB_PORT=5432
 # Express
 PORT=3000
 NODE_ENV=                 # set to "production" on the VPS
+RATE_LIMIT_SKIP_IPS=      # optional, comma-separated IPs exempt from rate limiting (loopback already exempt)
 ```
 
-The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`.
+The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, `guildId`, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`.
 
 ## Local development
 
@@ -145,7 +146,7 @@ Site routes (mounted at `/api`, see [`routes/filmRoutes.js`](routes/filmRoutes.j
 | `GET /neighbors-differ/:a/:b` | Films two neighbors disagreed on |
 | `GET /evil-mank` | Bottom-ranked films (inverse of `/rankings`) |
 
-Discord bot routes (mounted at `/api/discord`, see [`routes/discordRoutes.js`](routes/discordRoutes.js)):
+Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discordRoutes.js`](routes/discordRoutes.js)):
 
 | Route | Description |
 |---|---|
@@ -154,7 +155,31 @@ Discord bot routes (mounted at `/api/discord`, see [`routes/discordRoutes.js`](r
 | `GET /films/nearmank/:rank` | Film at the given near-mank position (7–9 ratings, top 100) |
 | `GET /films/ratings?query=…` | Search a film and return its ratings histogram |
 | `GET /films/by-contributor?query=…&type=Director\|Actor` | Films by a director or actor, joined against MKDb |
-| `GET /posters-grid?slugs=…` | 4×2 JPEG composite of up to 8 film posters |
+| `GET /posters-grid?slugs=…` | 4×2 JPEG composite of up to 8 film posters, generated on-demand by `sharp` |
+
+### Rate limits
+
+External clients are rate-limited per IP via [`express-rate-limit`](https://www.npmjs.com/package/express-rate-limit):
+
+- **100 req/min** for any `/api/*` route
+- **30 req/min** for `/api/discord/films/by-contributor` and `/api/discord/posters-grid` (these hit the Letterboxd API and run `sharp`)
+
+Loopback (`127.0.0.1`, `::1`) is exempt — that's how mankbot reaches the API in prod, by calling `http://localhost:3000` directly. Add comma-separated IPs to `RATE_LIMIT_SKIP_IPS` to exempt others. Pagination endpoints also cap `?limit=N` at 500.
+
+## Discord bot
+
+mankbot exposes a single `/mkdb` slash command with subcommands. All replies are paginated embeds with ⏮ ◀ ▶ ⏭ buttons where applicable.
+
+| Command | Description |
+|---|---|
+| `/mkdb search query:<text>` | Search MKDb for a film |
+| `/mkdb rank number:<1–1000>` | Film at the given MKDb rank |
+| `/mkdb random scope:<top1000\|ultramank\|nearmank>` | Random film from the chosen bucket |
+| `/mkdb ratings query:<text>` | Show community ratings for a film |
+| `/mkdb director query:<text>` | Films directed by someone, matched against MKDb |
+| `/mkdb actor query:<text>` | Films an actor appeared in, matched against MKDb |
+
+`/mkdb director` and `/mkdb actor` page through the person's contributions on Letterboxd, intersect with MKDb, and present each page as a card with the contributor photo as a thumbnail plus a 4×2 poster composite (rendered by the `posters-grid` endpoint and uploaded as a Discord file attachment, so no public image URL is required).
 
 ## Production
 
@@ -167,6 +192,18 @@ pm2 restart server
 ```
 
 PostgreSQL runs locally on the droplet (UNIX socket, peer auth). nginx terminates TLS (Let's Encrypt) and reverse-proxies all traffic — including `/images/*` and the SPA HTML — to Node on `localhost:3000`. Posters and avatars are served from disk by Express's static middleware (`app.use('/images', express.static(...))`); the React `client/dist` bundle is served the same way.
+
+**nginx forwarded-headers:** the `location /` block in the vhost forwards client identity so the rate limiter sees real IPs (without these, Express sees every request as coming from `127.0.0.1` and skips the limit):
+
+```nginx
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Express trusts one proxy hop (`app.set('trust proxy', 1)` in [`server.js`](server.js)) when `NODE_ENV=production`.
+
+**Bot's API base URL:** on the VPS, `discord-bot/.env` sets `MKDB_API_BASE_URL=http://localhost:3000/api/discord` so mankbot reaches the API via loopback — faster (no nginx round-trip) and rate-limit-exempt.
 
 **SSH access:** key-only (Ed25519). Password authentication is disabled, root login is `prohibit-password`. fail2ban watches the systemd journal and bans IPs after repeated SSH failures.
 
