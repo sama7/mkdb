@@ -244,10 +244,12 @@ export const filmsByContributor = async (req, res) => {
         const full = await apiRequest('GET', `/contributor/${encodeURIComponent(hit.id)}`);
         const contributor = shapeContributor(full);
 
+        const MAX_LIDS = 500;
         const lids = [];
         for await (const item of paginate(`/contributor/${encodeURIComponent(hit.id)}/contributions`, { type, perPage: 100 })) {
             const lid = item?.film?.id;
             if (lid) lids.push(lid);
+            if (lids.length >= MAX_LIDS) break;
         }
 
         if (lids.length === 0) {

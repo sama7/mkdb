@@ -1,5 +1,12 @@
 import pool from '../db/conn.js';
 
+const MAX_LIMIT = 500;
+function clampLimit(raw, defaultValue) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return defaultValue;
+    return Math.min(Math.floor(n), MAX_LIMIT);
+}
+
 // Function to get top film rankings with optional filters
 export const getFilmRankings = async (req, res) => {
     try {
@@ -13,10 +20,11 @@ export const getFilmRankings = async (req, res) => {
             maxYear,
             minRatings = 10,  // Default value
             maxRatings,
-            limit = 100,       // same as filmsPerPage
+            limit: rawLimit,
             genres = {}
         } = { ...filters, ...req.query };
 
+        const limit = clampLimit(rawLimit, 100);
         const offset = (page - 1) * limit;  // for pagination
         const queryParams = [];
         let paramIndex = 1;
@@ -116,14 +124,7 @@ export const getFilmRankings = async (req, res) => {
 
         queryParams.push(limit, offset);
 
-        console.log(`query: ${query}`);
-        console.log(`queryParams: ${queryParams}`);
-
         const { rows } = await pool.query(query, queryParams);
-        console.log(`Query returned ${rows.length} rows.`);
-        if (rows.length > 0) {
-            console.log(`total_count: ${rows[0].total_count}`);
-        }
         res.json(rows);
     } catch (error) {
         console.error('Error fetching top film rankings:', error);
@@ -144,10 +145,11 @@ export const getEvilMankFilmRankings = async (req, res) => {
             maxYear,
             minRatings = 10,  // Default value
             maxRatings,
-            limit = 100,       // same as filmsPerPage
+            limit: rawLimit,
             genres = {}
         } = { ...filters, ...req.query };
 
+        const limit = clampLimit(rawLimit, 100);
         const offset = (page - 1) * limit;  // for pagination
         const queryParams = [];
         let paramIndex = 1;
@@ -247,14 +249,7 @@ export const getEvilMankFilmRankings = async (req, res) => {
 
         queryParams.push(limit, offset);
 
-        console.log(`query: ${query}`);
-        console.log(`queryParams: ${queryParams}`);
-
         const { rows } = await pool.query(query, queryParams);
-        console.log(`Query returned ${rows.length} rows.`);
-        if (rows.length > 0) {
-            console.log(`total_count: ${rows[0].total_count}`);
-        }
         res.json(rows);
     } catch (error) {
         console.error('Error fetching bottom film rankings:', error);
@@ -479,10 +474,11 @@ export const getMembers = async (req, res) => {
         // Extract page
         const {
             page = 1,
-            limit = 25,       // same as membersPerPage
+            limit: rawLimit,
             sort = 'Watched',
         } = { ...req.query };
 
+        const limit = clampLimit(rawLimit, 25);
         const offset = (page - 1) * limit;  // for pagination
 
         let query = `
@@ -517,10 +513,6 @@ export const getMembers = async (req, res) => {
         }
 
         const { rows } = await pool.query(query, [limit, offset]);
-        console.log(`Query returned ${rows.length} rows.`);
-        if (rows.length > 0) {
-            console.log(`total_count: ${rows[0].total_count}`);
-        }
         res.json(rows);
     } catch (error) {
         console.error('Error fetching members:', error);
@@ -572,10 +564,11 @@ export const getMemberNeighbors = async (req, res) => {
         // Extract page
         const {
             page = 1,
-            limit = 25,       // same as membersPerPage
+            limit: rawLimit,
             sort = 'Similarity Score',
         } = { ...req.query };
 
+        const limit = clampLimit(rawLimit, 25);
         const offset = (page - 1) * limit;  // for pagination
 
         let query = `
@@ -628,10 +621,6 @@ export const getMemberNeighbors = async (req, res) => {
         }
 
         const { rows } = await pool.query(query, [username, limit, offset]);
-        console.log(`Query returned ${rows.length} rows.`);
-        if (rows.length > 0) {
-            console.log(`total_count: ${rows[0].total_count}`);
-        }
         res.json(rows);
     } catch (error) {
         console.error('Error fetching members:', error);
@@ -680,9 +669,10 @@ export const getNeighborAgreedFilms = async (req, res) => {
         // Extract page
         const {
             page = 1,
-            limit = 20,       // same as filmsPerPage
+            limit: rawLimit,
         } = { ...req.query };
 
+        const limit = clampLimit(rawLimit, 20);
         const offset = (page - 1) * limit;  // for pagination of films whose rating they agreed on
 
         const query = `
@@ -715,10 +705,6 @@ export const getNeighborAgreedFilms = async (req, res) => {
         `;
 
         const { rows } = await pool.query(query, [username_a, username_b, limit, offset]);
-
-        if (rows.length > 0) {
-            console.log(`Agreed films total_count: ${rows[0].total_count}`);
-        }
         res.json(rows);
     } catch (error) {
         console.error('Error fetching neighbor agreed films:', error);
@@ -734,9 +720,10 @@ export const getNeighborDifferFilms = async (req, res) => {
         // Extract page
         const {
             page = 1,
-            limit = 20,       // same as filmsPerPage
+            limit: rawLimit,
         } = { ...req.query };
 
+        const limit = clampLimit(rawLimit, 20);
         const offset = (page - 1) * limit;  // for pagination of films whose rating they differed on
 
         const query = `
@@ -769,11 +756,6 @@ export const getNeighborDifferFilms = async (req, res) => {
         `;
 
         const { rows } = await pool.query(query, [username_a, username_b, limit, offset]);
-
-        if (rows.length > 0) {
-            console.log(`Differ films total_count: ${rows[0].total_count}`);
-        }
-
         res.json(rows);
     } catch (error) {
         console.error('Error fetching neighbor differ films:', error);
