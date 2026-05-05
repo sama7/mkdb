@@ -1,7 +1,12 @@
 import 'dotenv/config';
+import path from 'path';
+import sharp from 'sharp';
 import pool from '../db/conn.js';
 import { getFilmDetails } from './filmController.js';
-import { apiRequest } from '../sync/lbx-client.js';
+import { apiRequest, paginate } from '../sync/lbx-client.js';
+
+const POSTER_DIR = path.resolve('images/posters');
+const SLUG_RE = /^[a-z0-9-]+$/;
 
 function slugFromLink(link) {
     if (!link) return null;
@@ -191,6 +196,148 @@ export const getFilmByRank = async (req, res) => {
     } catch (err) {
         console.error('Error fetching film by rank:', err);
         res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+function pickContributorPhoto(poster) {
+    const sizes = poster?.sizes;
+    if (!Array.isArray(sizes) || sizes.length === 0) return null;
+    const atLeast300 = sizes.filter((s) => s.width >= 300).sort((a, b) => a.width - b.width);
+    return (atLeast300[0] ?? sizes.reduce((b, s) => (s.width > b.width ? s : b)))?.url ?? null;
+}
+
+function shapeContributor(c) {
+    const lbxLink = c.links?.find((l) => l.type === 'letterboxd');
+    return {
+        name: c.name,
+        lid: c.id,
+        photo_url: pickContributorPhoto(c.poster) || pickContributorPhoto(c.customPoster),
+        profile_url: lbxLink?.url || null,
+    };
+}
+
+/**
+ * GET /api/discord/films/by-contributor?query=<name>&type=Director|Actor
+ * 1. Search Letterboxd for the contributor (person)
+ * 2. Page their contributions of the given type
+ * 3. JOIN against `films` to keep only ones present in MKDb
+ * 4. Return contributor info + films sorted by current rank
+ */
+export const filmsByContributor = async (req, res) => {
+    const rawQuery = String(req.query.query ?? '');
+    const type = String(req.query.type ?? '');
+
+    if (!rawQuery) return res.status(400).json({ error: 'Query is required.' });
+    if (!['Director', 'Actor'].includes(type)) {
+        return res.status(400).json({ error: 'type must be Director or Actor.' });
+    }
+
+    try {
+        const search = await apiRequest('GET', '/search', {
+            query: { input: rawQuery, include: 'ContributorSearchItem', perPage: '1' },
+        });
+        const hit = search.items?.[0]?.contributor;
+        if (!hit) {
+            return res.status(404).json({ code: 'NO_CONTRIBUTOR_FOUND', message: 'No person found.' });
+        }
+
+        const full = await apiRequest('GET', `/contributor/${encodeURIComponent(hit.id)}`);
+        const contributor = shapeContributor(full);
+
+        const lids = [];
+        for await (const item of paginate(`/contributor/${encodeURIComponent(hit.id)}/contributions`, { type, perPage: 100 })) {
+            const lid = item?.film?.id;
+            if (lid) lids.push(lid);
+        }
+
+        if (lids.length === 0) {
+            return res.json({ contributor, films: [], total_letterboxd: 0 });
+        }
+
+        const { rows } = await pool.query(
+            `WITH latest AS (SELECT MAX(week) AS wk FROM film_rankings_history)
+             SELECT
+               f.title,
+               f.year,
+               f.slug,
+               (SELECT frh.ranking
+                  FROM film_rankings_history frh
+                  JOIN latest l ON frh.week = l.wk
+                 WHERE frh.film_id = f.film_id) AS current_rank,
+               AVG(r.rating) AS average_rating,
+               COUNT(r.rating) AS rating_count
+             FROM films f
+             JOIN ratings r ON r.film_id = f.film_id
+             WHERE f.letterboxd_id = ANY($1::text[])
+             GROUP BY f.film_id
+             ORDER BY current_rank ASC NULLS LAST,
+                      AVG(r.rating) DESC,
+                      f.year DESC NULLS LAST`,
+            [lids],
+        );
+
+        return res.json({
+            contributor,
+            films: rows,
+            total_letterboxd: lids.length,
+        });
+    } catch (err) {
+        console.error('Error in /films/by-contributor:', err);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+/**
+ * GET /api/discord/posters-grid?slugs=a,b,c,...
+ * Renders up to 8 posters in a 4x2 JPEG grid for embedding in Discord.
+ */
+export const getPostersGrid = async (req, res) => {
+    const raw = String(req.query.slugs ?? '');
+    const slugs = raw.split(',').filter((s) => SLUG_RE.test(s)).slice(0, 8);
+    if (slugs.length === 0) return res.status(400).json({ error: 'slugs required' });
+
+    const COLS = 4, ROWS = 2;
+    const CELL_W = 230, CELL_H = 345;
+    const GAP = 6;
+    const W = COLS * CELL_W + (COLS + 1) * GAP;
+    const H = ROWS * CELL_H + (ROWS + 1) * GAP;
+
+    try {
+        const tiles = await Promise.all(
+            slugs.map(async (slug, i) => {
+                try {
+                    const buf = await sharp(path.join(POSTER_DIR, `${slug}.jpg`))
+                        .resize(CELL_W, CELL_H, { fit: 'cover' })
+                        .toBuffer();
+                    return {
+                        input: buf,
+                        left: GAP + (i % COLS) * (CELL_W + GAP),
+                        top: GAP + Math.floor(i / COLS) * (CELL_H + GAP),
+                    };
+                } catch {
+                    return null;
+                }
+            }),
+        );
+
+        const out = await sharp({
+            create: {
+                width: W,
+                height: H,
+                channels: 3,
+                background: { r: 24, g: 25, b: 28 },
+            },
+        })
+            .composite(tiles.filter(Boolean))
+            .jpeg({ quality: 82 })
+            .toBuffer();
+
+        res.set('Content-Type', 'image/jpeg');
+        res.set('Cache-Control', 'public, max-age=86400');
+        return res.send(out);
+    } catch (err) {
+        console.error('Error in /posters-grid:', err);
+        return res.status(500).json({ error: 'Internal Server Error' });
     }
 };
 

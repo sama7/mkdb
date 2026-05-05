@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const path = require('node:path');
-const subcmds = ['search', 'rank', 'random', 'ratings'];
+const subcmds = ['search', 'rank', 'random', 'ratings', 'director', 'actor'];
 
 // Load each sub‑command file once and cache it
 const handlers = Object.fromEntries(
@@ -53,6 +53,22 @@ module.exports = {
         .setDescription('Show community ratings for a film')
         .addStringOption(o =>
           o.setName('query').setDescription('Film title').setRequired(true),
+        ),
+    )
+    // /mkdb director query:<text>
+    .addSubcommand(sc =>
+      sc.setName('director')
+        .setDescription('Search MKDb by director')
+        .addStringOption(o =>
+          o.setName('query').setDescription("Director's name").setRequired(true),
+        ),
+    )
+    // /mkdb actor query:<text>
+    .addSubcommand(sc =>
+      sc.setName('actor')
+        .setDescription('Search MKDb by actor')
+        .addStringOption(o =>
+          o.setName('query').setDescription("Actor's name").setRequired(true),
         ),
     ),
 

@@ -15,4 +15,10 @@ router.get('/films/nearmank/:rank', discordController.getNearMankFilmByRank);
 // GET /api/discord/films/ratings - Retrieve film details and ratings by search query
 router.get('/films/ratings', discordController.searchFilmRatings);
 
+// GET /api/discord/films/by-contributor - Films by director or actor (matched against MKDb)
+router.get('/films/by-contributor', discordController.filmsByContributor);
+
+// GET /api/discord/posters-grid?slugs=a,b,... - Composite poster grid for embeds
+router.get('/posters-grid', discordController.getPostersGrid);
+
 export default router;
