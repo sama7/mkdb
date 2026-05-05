@@ -153,6 +153,8 @@ Discord bot routes (mounted at `/api/discord`, see [`routes/discordRoutes.js`](r
 | `GET /films/rank/:rank` | Film at the given top-rankings position |
 | `GET /films/nearmank/:rank` | Film at the given near-mank position (7–9 ratings, top 100) |
 | `GET /films/ratings?query=…` | Search a film and return its ratings histogram |
+| `GET /films/by-contributor?query=…&type=Director\|Actor` | Films by a director or actor, joined against MKDb |
+| `GET /posters-grid?slugs=…` | 4×2 JPEG composite of up to 8 film posters |
 
 ## Production
 
