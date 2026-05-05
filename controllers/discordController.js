@@ -206,13 +206,23 @@ function pickContributorPhoto(poster) {
     return (atLeast300[0] ?? sizes.reduce((b, s) => (s.width > b.width ? s : b)))?.url ?? null;
 }
 
-function shapeContributor(c) {
+function shapeContributor(c, type) {
+    // The Letterboxd API returns the contributor's *primary* role URL
+    // (e.g. /director/georges-melies-1/ for Méliès, even when the user
+    // ran /mkdb actor). Rewrite the role segment to match the request so
+    // each subcommand links to the matching filter view.
     const lbxLink = c.links?.find((l) => l.type === 'letterboxd');
+    let profileUrl = lbxLink?.url || null;
+    if (profileUrl && (type === 'Director' || type === 'Actor')) {
+        const role = type.toLowerCase();
+        const m = profileUrl.match(/^(https:\/\/letterboxd\.com\/)[^/]+\/([^/]+)\/?$/);
+        if (m) profileUrl = `${m[1]}${role}/${m[2]}/`;
+    }
     return {
         name: c.name,
         lid: c.id,
         photo_url: pickContributorPhoto(c.poster) || pickContributorPhoto(c.customPoster),
-        profile_url: lbxLink?.url || null,
+        profile_url: profileUrl,
     };
 }
 
@@ -242,7 +252,7 @@ export const filmsByContributor = async (req, res) => {
         }
 
         const full = await apiRequest('GET', `/contributor/${encodeURIComponent(hit.id)}`);
-        const contributor = shapeContributor(full);
+        const contributor = shapeContributor(full, type);
 
         const MAX_LIDS = 500;
         const lids = [];
