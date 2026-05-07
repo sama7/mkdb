@@ -214,6 +214,14 @@ pm2 logs server           # tail Node logs
 pm2 restart server
 ```
 
+**First-time pm2 setup** (or after wiping the process list):
+
+```bash
+npm run build && cd client && npm run build && cd ..
+pm2 start dist/server.js --name server
+pm2 save
+```
+
 **Deploying new code** — `dist/` is gitignored, so TypeScript must be compiled on the VPS from source on every deploy:
 
 ```bash
