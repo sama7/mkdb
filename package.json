@@ -2,12 +2,15 @@
   "name": "mkdb",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "dist/server.js",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "smoke:api": "node dist/scripts/smoke-api.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "sync": "node sync/index.js",
-    "promote": "node scripts/promote.js",
+    "start": "node dist/server.js",
+    "sync": "node dist/sync/index.js",
+    "promote": "node dist/scripts/promote.js",
     "backfill-film-lids": "node scripts/backfill-film-lids.js"
   },
   "keywords": [],
@@ -21,5 +24,12 @@
     "express-rate-limit": "^8.5.0",
     "pg": "^8.12.0",
     "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/node": "^24.12.2",
+    "@types/pg": "^8.20.0",
+    "typescript": "^6.0.3"
   }
 }

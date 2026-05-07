@@ -13,7 +13,7 @@ mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterb
 
 ## Tech stack
 
-- **Backend:** Node.js (ES modules) + Express + `pg` driver
+- **Backend:** TypeScript + Node.js (ES modules) + Express + `pg` driver
 - **Database:** PostgreSQL 16
 - **Frontend:** React + Vite + react-bootstrap + react-router-dom (in [`client/`](client/))
 - **Discord bot:** mankbot — Discord.js slash commands that call the `/api/discord/*` endpoints (CommonJS, in [`discord-bot/`](discord-bot/))
@@ -25,22 +25,22 @@ mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterb
 
 ```
 mkdb/
-├── server.js                 # Express entrypoint
+├── server.ts                 # Express entrypoint
 ├── routes/
-│   ├── filmRoutes.js         # /api/* — site routes
-│   └── discordRoutes.js      # /api/discord/* — Discord bot routes
+│   ├── filmRoutes.ts         # /api/* — site routes
+│   └── discordRoutes.ts      # /api/discord/* — Discord bot routes
 ├── controllers/
-│   ├── filmController.js
-│   └── discordController.js
-├── db/conn.js                # pg Pool (reads DB_USER / DB_PASSWORD)
+│   ├── filmController.ts
+│   └── discordController.ts
+├── db/conn.ts                # pg Pool (reads DB_USER / DB_PASSWORD)
 ├── sync/                     # Weekly Letterboxd → DB pipeline
-│   ├── index.js              #   orchestrator: discover → ratings → films → promote
-│   ├── lbx-client.js         #   HMAC signer + token cache + rate-limited fetch
-│   ├── discover-members.js   #   enumerate metrodb's followings
-│   ├── sync-ratings.js       #   page each member's ratings into ratings_stg
-│   ├── sync-films.js         #   fetch detail + poster for new films
-│   └── download-image.js     #   shared HTTPS-with-redirect downloader
-├── scripts/promote.js        # runs sql/promote_and_rank.sql + unlinks orphan posters
+│   ├── index.ts              #   orchestrator: discover → ratings → films → promote
+│   ├── lbx-client.ts         #   HMAC signer + token cache + rate-limited fetch
+│   ├── discover-members.ts   #   enumerate metrodb's followings
+│   ├── sync-ratings.ts       #   page each member's ratings into ratings_stg
+│   ├── sync-films.ts         #   fetch detail + poster for new films
+│   └── download-image.ts     #   shared HTTPS-with-redirect downloader
+├── scripts/promote.ts        # runs sql/promote_and_rank.sql + unlinks orphan posters
 ├── sql/
 │   ├── 001_schema_for_api.sql        # one-time API-migration ALTERs
 │   └── promote_and_rank.sql          # the promote transaction
@@ -77,7 +77,7 @@ LETTERBOXD_CLIENT_SECRET=
 # PostgreSQL
 DB_USER=                  # production
 DB_PASSWORD=
-DEV_DB_USER=              # local dev fallback (db/conn.js falls back to these)
+DEV_DB_USER=              # local dev fallback (db/conn.ts falls back to these)
 DEV_DB_PASSWORD=
 DB_PORT=5432
 
@@ -96,6 +96,7 @@ The site needs two processes running: Node serves the API + images on port 3000,
 ```bash
 # 1. Backend
 npm install
+npm run build
 npm start                 # http://localhost:3000  (API + /images)
 
 # 2. Frontend (separate terminal)
@@ -112,14 +113,36 @@ node index.js             # run the bot
 
 The frontend deep-links — `/film/:slug`, `/members/:username`, `/members/:a/:b` — work in both dev and prod.
 
-**In production there's no Vite dev server** — only the static bundle it produces. The deploy step is `cd client && npm run build`, which writes the optimized SPA to `client/dist/`. Node then serves that bundle via the `*` catchall in [server.js](server.js), alongside the API routes and `/images/*` static files. nginx sits in front and proxies all traffic to Node on `localhost:3000`. So Vite is a build-time tool in prod, not a runtime one.
+**In production there's no Vite dev server** — only the static bundle it produces. The deploy step is `npm run build && cd client && npm run build`, which writes the optimized SPA to `client/dist/` and compiles the backend to `dist/`. Node then serves that bundle via the `*` catchall in [server.ts](server.ts), alongside the API routes and `/images/*` static files. nginx sits in front and proxies all traffic to Node on `localhost:3000`. So Vite is a build-time tool in prod, not a runtime one.
+
+## Local validation
+
+```bash
+npm run typecheck
+npm run build
+npm start
+npm run smoke:api
+
+cd client
+npm run typecheck
+npm run lint
+npm run build
+```
+
+`sharp` ships native binaries via npm optional dependencies (one per platform). `npm install` picks the right one for the current `os`/`cpu`. If `npm start` ever fails with `Could not load the "sharp" module using the <platform> runtime`, the optional binary didn't install — usually because `node_modules` was populated under a different Node architecture. Repair:
+
+```bash
+rm -f node_modules/.package-lock.json
+npm install --include=optional
+```
 
 ## Weekly sync
 
-Manual cadence (Sunday night into Monday). The orchestrator runs all four stages in order; `sync/index.js` truncates staging at the start so the run is self-contained.
+Manual cadence (Sunday night into Monday). The orchestrator runs all four stages in order; `sync/index.ts` truncates staging at the start so the run is self-contained.
 
 ```bash
 # Locally
+npm run build
 npm run sync 2>&1 | tee dumps/sync_$(date +%F).log
 
 # On the VPS
@@ -130,7 +153,7 @@ Throughput: ~120 films/min for full detail fetches (measured during the initial 
 
 ## API endpoints
 
-Site routes (mounted at `/api`, see [`routes/filmRoutes.js`](routes/filmRoutes.js)):
+Site routes (mounted at `/api`, see [`routes/filmRoutes.ts`](routes/filmRoutes.ts)):
 
 | Route | Description |
 |---|---|
@@ -146,7 +169,7 @@ Site routes (mounted at `/api`, see [`routes/filmRoutes.js`](routes/filmRoutes.j
 | `GET /neighbors-differ/:a/:b` | Films two neighbors disagreed on |
 | `GET /evil-mank` | Bottom-ranked films (inverse of `/rankings`) |
 
-Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discordRoutes.js`](routes/discordRoutes.js)):
+Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discordRoutes.ts`](routes/discordRoutes.ts)):
 
 | Route | Description |
 |---|---|
@@ -191,6 +214,16 @@ pm2 logs server           # tail Node logs
 pm2 restart server
 ```
 
+**Deploying new code** — `dist/` is gitignored, so TypeScript must be compiled on the VPS from source on every deploy:
+
+```bash
+git pull
+npm ci
+npm run build             # compile TypeScript → dist/
+cd client && npm run build && cd ..   # compile SPA → client/dist/
+pm2 restart server
+```
+
 PostgreSQL runs locally on the droplet (UNIX socket, peer auth). nginx terminates TLS (Let's Encrypt) and reverse-proxies all traffic — including `/images/*` and the SPA HTML — to Node on `localhost:3000`. Posters and avatars are served from disk by Express's static middleware (`app.use('/images', express.static(...))`); the React `client/dist` bundle is served the same way.
 
 **nginx forwarded-headers:** the `location /` block in the vhost forwards client identity so the rate limiter sees real IPs (without these, Express sees every request as coming from `127.0.0.1` and skips the limit):
@@ -201,7 +234,7 @@ proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
-Express trusts one proxy hop (`app.set('trust proxy', 1)` in [`server.js`](server.js)) when `NODE_ENV=production`.
+Express trusts one proxy hop (`app.set('trust proxy', 1)` in [`server.ts`](server.ts)) when `NODE_ENV=production`.
 
 **Bot's API base URL:** on the VPS, `discord-bot/.env` sets `MKDB_API_BASE_URL=http://localhost:3000/api/discord` so mankbot reaches the API via loopback — faster (no nginx round-trip) and rate-limit-exempt.
 
