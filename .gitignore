@@ -40,4 +40,5 @@ client/*.sw?
 
 # Discord bot directories and files
 discord-bot/node_modules
+discord-bot/dist
 discord-bot/.env

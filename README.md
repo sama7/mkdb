@@ -16,7 +16,7 @@ mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterb
 - **Backend:** TypeScript + Node.js (ES modules) + Express + `pg` driver
 - **Database:** PostgreSQL 16
 - **Frontend:** React + Vite + react-bootstrap + react-router-dom (in [`client/`](client/))
-- **Discord bot:** mankbot — Discord.js slash commands that call the `/api/discord/*` endpoints (CommonJS, in [`discord-bot/`](discord-bot/))
+- **Discord bot:** mankbot — Discord.js slash commands that call the `/api/discord/*` endpoints (TypeScript, in [`discord-bot/`](discord-bot/))
 - **Data source:** [Letterboxd API](https://api-docs.letterboxd.com/) (HMAC-SHA256 signed requests, client-credentials Bearer token)
 - **Process management:** pm2 (`server`, `mankbot`)
 - **Reverse proxy:** nginx → Node on `localhost:3000`
@@ -107,8 +107,9 @@ npm run dev               # http://localhost:5173  (SPA, with hot reload)
 # 3. Discord bot (optional, separate terminal)
 cd discord-bot
 npm install
-node deploy-commands.js   # one-time: register slash commands with Discord
-node index.js             # run the bot
+npm run build
+npm run deploy-commands   # one-time: register slash commands with Discord
+npm start                 # run the bot
 ```
 
 The frontend deep-links — `/film/:slug`, `/members/:username`, `/members/:a/:b` — work in both dev and prod.
@@ -219,17 +220,22 @@ pm2 restart server
 ```bash
 npm run build && cd client && npm run build && cd ..
 pm2 start dist/server.js --name server
+cd discord-bot && npm ci && npm run build
+pm2 start dist/index.js --name mankbot --cwd "$PWD"
+cd ..
 pm2 save
 ```
 
-**Deploying new code** — `dist/` is gitignored, so TypeScript must be compiled on the VPS from source on every deploy:
+**Deploying new code** — `dist/` is gitignored on every layer, so TypeScript must be compiled on the VPS from source on every deploy. If only one layer changed, only that layer needs to be rebuilt and restarted.
 
 ```bash
 git pull
 npm ci
-npm run build             # compile TypeScript → dist/
-cd client && npm run build && cd ..   # compile SPA → client/dist/
+npm run build             # compile backend TypeScript → dist/
+cd client && npm run build && cd ..    # compile SPA → client/dist/
+cd discord-bot && npm ci && npm run build && cd ..   # compile bot → discord-bot/dist/
 pm2 restart server
+pm2 restart mankbot
 ```
 
 PostgreSQL runs locally on the droplet (UNIX socket, peer auth). nginx terminates TLS (Let's Encrypt) and reverse-proxies all traffic — including `/images/*` and the SPA HTML — to Node on `localhost:3000`. Posters and avatars are served from disk by Express's static middleware (`app.use('/images', express.static(...))`); the React `client/dist` bundle is served the same way.
