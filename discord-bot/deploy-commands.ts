@@ -8,12 +8,22 @@ import { REST, Routes } from 'discord.js';
 import type { MkdbCommand } from './commands/types.js';
 
 const clientId = process.env.clientId;
-const guildId = process.env.guildId;
 const token = process.env.DISCORD_TOKEN;
+
+// Collect every env var whose name starts with `guildId` (case-insensitive).
+// Lets local use a single `guildId=...` while prod uses any number of named
+// variants like `guildIdMetro=...`, `guildIdLycan=...` — the deploy step PUTs
+// the same command set to each. Deduplicate so a stray duplicate value won't
+// double-register.
+const guildIds = [...new Set(
+    Object.entries(process.env)
+        .filter(([k, v]) => /^guildId/i.test(k) && typeof v === 'string' && v.trim().length > 0)
+        .map(([, v]) => v!.trim()),
+)];
 
 if (!token) throw new Error('Missing DISCORD_TOKEN in your .env');
 if (!clientId) throw new Error('Missing clientId in your .env');
-if (!guildId) throw new Error('Missing guildId in your .env');
+if (guildIds.length === 0) throw new Error('Missing guildId in your .env (use guildId=... for one guild, or guildIdName=... entries for multiple)');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,17 +52,20 @@ for (const folder of commandFolders) {
 
 const rest = new REST().setToken(token);
 
-try {
-    console.log(`Started refreshing ${commands.length} application (/) commands.`);
+console.log(`Started refreshing ${commands.length} application (/) commands across ${guildIds.length} guild(s).`);
 
-    // The PUT method fully replaces all guild commands with the current set.
-    const data = await rest.put(
-        Routes.applicationGuildCommands(clientId, guildId),
-        { body: commands },
-    );
-
-    const refreshedCount = Array.isArray(data) ? data.length : 0;
-    console.log(`Successfully reloaded ${refreshedCount} application (/) commands.`);
-} catch (error) {
-    console.error(error);
+// PUT replaces the full command set for each guild. We do this one guild at
+// a time rather than Promise.all so a Discord rate-limit on one guild doesn't
+// mask the success/failure of the others.
+for (const guildId of guildIds) {
+    try {
+        const data = await rest.put(
+            Routes.applicationGuildCommands(clientId, guildId),
+            { body: commands },
+        );
+        const refreshedCount = Array.isArray(data) ? data.length : 0;
+        console.log(`  guild ${guildId}: reloaded ${refreshedCount} command(s).`);
+    } catch (error) {
+        console.error(`  guild ${guildId}: failed to deploy`, error);
+    }
 }
