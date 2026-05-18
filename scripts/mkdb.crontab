@@ -1,0 +1,22 @@
+# mkdb weekly sync schedule. Source of truth — what `crontab -l` on the VPS
+# should show. Install (or re-install after a rebuild) with:
+#
+#     crontab scripts/mkdb.crontab
+#
+# Verify with `crontab -l`. The VPS timezone is America/New_York, so the
+# times below are Eastern (check with `timedatectl`; if it ever drifts off
+# America/New_York, run `timedatectl set-timezone America/New_York` first).
+#
+# Why `\%F` instead of `%F`: cron treats an unescaped `%` as a newline inside
+# the command field, which truncates the command. The backslash forces a
+# literal `%`, so when cron actually invokes the shell, `$(date +%F)` runs
+# at fire time and the log file is dated for the day it actually ran.
+
+PATH=/usr/bin:/bin
+
+# Sun 11:00 PM ET — populate staging (discover → ratings → films). ~45-50 min.
+0 23 * * 0 cd /root/mkdb && npm run sync    >> dumps/sync_$(date +\%F).log    2>&1
+
+# Mon 12:00 AM ET — swap staging into live, recompute similarity, append the
+# new ranking week, trim history, delete orphan films + posters. ~30 sec.
+0  0 * * 1 cd /root/mkdb && npm run promote >> dumps/promote_$(date +\%F).log 2>&1

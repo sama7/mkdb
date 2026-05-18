@@ -156,17 +156,14 @@ nohup npm run sync > dumps/sync_$(date +%F).log 2>&1 &
 nohup npm run promote > dumps/promote_$(date +%F).log 2>&1 &
 ```
 
-In production both stages run on a weekly cron (`crontab -l` on the VPS):
+In production both stages run on a weekly cron — sync at Sun 11:00 PM ET, promote at Mon 12:00 AM ET. The source of truth is [`scripts/mkdb.crontab`](scripts/mkdb.crontab); install (or re-install on a new VPS) with:
 
-```cron
-# mkdb weekly sync — VPS timezone is America/New_York, so these are ET
-PATH=/usr/bin:/bin
-
-0 23 * * 0 cd /root/mkdb && npm run sync    >> dumps/sync_$(date +\%F).log    2>&1   # Sun 11:00 PM ET
-0  0 * * 1 cd /root/mkdb && npm run promote >> dumps/promote_$(date +\%F).log 2>&1   # Mon 12:00 AM ET
+```bash
+crontab scripts/mkdb.crontab
+crontab -l                # verify
 ```
 
-The 1-hour gap between sync start and promote assumes sync finishes well under an hour (last run: 47 min). If sync ever creeps toward 60 min, widen the gap — promoting while sync is still writing into staging would corrupt the swap.
+The VPS timezone must be `America/New_York` (`timedatectl` to check, `timedatectl set-timezone America/New_York` to fix). The 1-hour gap between sync start and promote assumes sync finishes well under an hour (last run: 47 min). If sync ever creeps toward 60 min, widen the gap in the crontab — promoting while sync is still writing into staging would corrupt the swap.
 
 Throughput: ~120 films/min for full detail fetches (measured during the initial backfill of ~59k films, which took ~9 hours). Steady-state weekly syncs only hit the detail endpoint for genuinely new films (`details_fetched_at IS NULL`); the bulk of runtime is paginating each member's ratings.
 
