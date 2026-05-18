@@ -87,7 +87,7 @@ NODE_ENV=                 # set to "production" on the VPS
 RATE_LIMIT_SKIP_IPS=      # optional, comma-separated IPs exempt from rate limiting (loopback already exempt)
 ```
 
-The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, `guildId`, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`.
+The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, one or more `guildId*` entries, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`. `deploy-commands` picks up every env var matching `/^guildId/i` and PUTs the same command set to each — so prod can register slash commands across multiple servers (e.g. `guildIdMetro=...`, `guildIdLycan=...`) with no code change. We prefer guild-scoped registration because it propagates instantly; global commands sit in Discord's CDN cache for up to an hour.
 
 ## Local development
 
@@ -139,18 +139,36 @@ npm install --include=optional
 
 ## Weekly sync
 
-Manual cadence (Sunday night into Monday). The orchestrator runs all four stages in order; `sync/index.ts` truncates staging at the start so the run is self-contained.
+Two stages, run separately so they can be scheduled and monitored independently:
+
+- `npm run sync` — discover community members → pull ratings into staging → fetch details + posters for new films. Truncates staging at the start so each run is self-contained. Recent runs take ~45-50 minutes.
+- `npm run promote` — swap staging into live tables in one transaction, recompute similarity, append the new ranking week, trim history to 3 weeks, delete orphan films + posters. Typically <30 seconds.
 
 ```bash
-# Locally
+# Manual local run (one-off)
 npm run build
-npm run sync 2>&1 | tee dumps/sync_$(date +%F).log
+npm run sync 2>&1    | tee dumps/sync_$(date +%F).log
+npm run promote 2>&1 | tee dumps/promote_$(date +%F).log
 
-# On the VPS
+# Manual VPS run (one-off, detached)
 nohup npm run sync > dumps/sync_$(date +%F).log 2>&1 &
+# wait for the sync to finish, then:
+nohup npm run promote > dumps/promote_$(date +%F).log 2>&1 &
 ```
 
-Throughput: ~120 films/min for full detail fetches (measured during the initial backfill of ~59k films, which took ~9 hours). Steady-state weekly syncs should be much faster — only genuinely new films hit the detail endpoint (`details_fetched_at IS NULL`); the rest is just paginating each member's ratings.
+In production both stages run on a weekly cron (`crontab -l` on the VPS):
+
+```cron
+# mkdb weekly sync — VPS timezone is America/New_York, so these are ET
+PATH=/usr/bin:/bin
+
+0 23 * * 0 cd /root/mkdb && npm run sync    >> dumps/sync_$(date +\%F).log    2>&1   # Sun 11:00 PM ET
+0  0 * * 1 cd /root/mkdb && npm run promote >> dumps/promote_$(date +\%F).log 2>&1   # Mon 12:00 AM ET
+```
+
+The 1-hour gap between sync start and promote assumes sync finishes well under an hour (last run: 47 min). If sync ever creeps toward 60 min, widen the gap — promoting while sync is still writing into staging would corrupt the swap.
+
+Throughput: ~120 films/min for full detail fetches (measured during the initial backfill of ~59k films, which took ~9 hours). Steady-state weekly syncs only hit the detail endpoint for genuinely new films (`details_fetched_at IS NULL`); the bulk of runtime is paginating each member's ratings.
 
 ## API endpoints
 

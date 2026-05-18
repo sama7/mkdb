@@ -3,16 +3,18 @@ import pool from '../db/conn.js';
 import { discoverMembers } from './discover-members.js';
 import { syncAllRatings } from './sync-ratings.js';
 import { syncNewFilms } from './sync-films.js';
-import { runPromote } from '../scripts/promote.js';
 
 // Orchestrator order matters:
 // 0. Truncate staging tables so each run starts clean.
 // 1. Enumerate the metrodb-following community into users_stg.
 // 2. Pull every member's ratings into ratings_stg, stubbing new films into `films`.
 // 3. Sync film details + posters for all new films (details_fetched_at IS NULL).
-//    Must happen before promote so the live site never shows films with missing details.
-// 4. Promote: swap staging into live, recompute similarity, append the new ranking
-//    week, trim history to 3 weeks, delete orphan films + their posters.
+//
+// Promote (swap staging → live, recompute similarity, append the new ranking
+// week, trim history to 3 weeks, delete orphan films + their posters) is run
+// SEPARATELY via `npm run promote`. The two stages are scheduled by cron at
+// different times (sync Sunday 23:00 ET, promote Monday 00:00 ET) so they
+// can be timed and monitored independently.
 
 function formatDuration(ms: number): string {
     const totalSeconds = Math.floor(ms / 1000);
@@ -43,11 +45,7 @@ async function main() {
     const filmsResult = await syncNewFilms();
     console.log(`[sync] film details: ok=${filmsResult.ok}, failed=${filmsResult.failed}, total=${filmsResult.total} in ${formatDuration(Date.now() - tFilms)}`);
 
-    const tPromote = Date.now();
-    const promoteResult = await runPromote();
-    console.log(`[sync] promote done: orphans=${promoteResult.orphanCount}, posters_removed=${promoteResult.postersRemoved} in ${formatDuration(Date.now() - tPromote)}`);
-
-    console.log(`[sync] done in ${formatDuration(Date.now() - t0)}`);
+    console.log(`[sync] done in ${formatDuration(Date.now() - t0)} (staging populated; run \`npm run promote\` to swap into live)`);
 }
 
 main()
