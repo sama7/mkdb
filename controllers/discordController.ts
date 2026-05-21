@@ -466,10 +466,13 @@ export const getPostersGrid = async (req: Request, res: Response) => {
                 { input: frameSvg, left: 0, top: 0 },
                 ...overlays,
             ])
-            .jpeg({ quality: 82 })
+            // PNG (not JPEG) so the flat-color frame and centering margins stay
+            // exact — JPEG chroma subsampling drifts those by a few RGB points
+            // and shows up as visible color noise around the posters.
+            .png()
             .toBuffer();
 
-        res.set('Content-Type', 'image/jpeg');
+        res.set('Content-Type', 'image/png');
         res.set('Cache-Control', 'public, max-age=86400');
         return res.send(out);
     } catch (err) {

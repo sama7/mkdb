@@ -137,7 +137,7 @@ export async function runContributor(
             const r = await fetch(`${MKDB_API_BASE}/posters-grid?slugs=${encodeURIComponent(slugList)}`);
             if (r.ok) {
                 const buf = Buffer.from(await r.arrayBuffer());
-                const name = `posters-${page}.jpg`;
+                const name = `posters-${page}.png`;
                 attachment = new AttachmentBuilder(buf, { name });
                 grid = new EmbedBuilder().setImage(`attachment://${name}`);
             }
