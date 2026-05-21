@@ -88,7 +88,7 @@ const subcommand: MkdbSubCommand = {
             .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'})`)
             .setURL(`${MKDB_BASE_URL}/film/${slug}`)
             .setDescription(descParts.join('\n') || '—')
-            .setThumbnail(`https://mkdb.co/images/posters/${slug}.jpg`)
+            .setThumbnail(`https://mkdb.co/images/discord-thumb/${slug}.jpg`)
             .addFields(
                 { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
                 { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },

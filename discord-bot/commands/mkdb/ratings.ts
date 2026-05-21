@@ -127,7 +127,7 @@ const subcommand: MkdbSubCommand = {
             return new EmbedBuilder()
                 .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'}) — Community ratings`)
                 .setURL(`${MKDB_BASE_URL}/film/${slug}`)
-                .setThumbnail(`https://mkdb.co/images/posters/${slug}.jpg`)
+                .setThumbnail(`https://mkdb.co/images/discord-thumb/${slug}.jpg`)
                 .setDescription(slice.join('\n'))
                 .addFields(
                     { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
