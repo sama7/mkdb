@@ -62,20 +62,34 @@ app.use(cors({
 // Poster fallback: the sync writes a ~118-byte empty-stub JPEG for films
 // whose Letterboxd entry has no poster, which would otherwise render as a
 // blank box on the site. Intercept those (and any genuinely missing files)
-// and serve a rasterised PNG of the placeholder SVG. PNG (not SVG) because
-// Discord embed thumbnails only render raster formats — an SVG response
-// makes setThumbnail render nothing. Real posters fall through to the
-// static middleware below.
+// and serve a rasterized PNG. PNG (not SVG) because Discord embed thumbnails
+// only render raster formats — an SVG response makes setThumbnail render
+// nothing. Real posters fall through to the static middleware below.
 const POSTER_DIR = path.join(__dirname, 'images', 'posters');
 const PLACEHOLDER_SVG_PATH = path.join(__dirname, 'images', 'placeholder-poster.svg');
 const EMPTY_POSTER_BYTES = 118;   // matches the sentinel size the sync writes
 const POSTER_SLUG_RE = /^([a-z0-9-]+)\.jpg$/;
 
-// Lazy-rasterise the SVG to a 300×450 PNG buffer once, then reuse for every
-// missing-poster request. Sharp resolves SVG via librsvg.
+// Minimal film-frame SVG for the public poster URL (Discord single-embed
+// thumbnails). Simpler than placeholder-poster.svg so it reads clearly at
+// the ~80 px width Discord displays embed thumbnails. The grid endpoint in
+// discordController.ts uses the full SVG directly via sharp.
+const SIMPLE_PLACEHOLDER_SVG = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">' +
+    '<rect width="300" height="450" fill="#242424"/>' +
+    '<rect x="48" y="24" width="204" height="402" fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="10"/>' +
+    '<rect x="8" y="120" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
+    '<rect x="8" y="276" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
+    '<rect x="260" y="120" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
+    '<rect x="260" y="276" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
+    '</svg>'
+);
+
+// Lazy-rasterize the minimal SVG to a 300×450 PNG buffer once, then reuse
+// for every missing-poster request. Sharp resolves SVG via librsvg.
 let placeholderPngPromise: Promise<Buffer> | null = null;
 function getPlaceholderPng(): Promise<Buffer> {
-    placeholderPngPromise ??= sharp(PLACEHOLDER_SVG_PATH).png().toBuffer();
+    placeholderPngPromise ??= sharp(SIMPLE_PLACEHOLDER_SVG).png().toBuffer();
     return placeholderPngPromise;
 }
 
