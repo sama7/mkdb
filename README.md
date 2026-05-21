@@ -47,7 +47,8 @@ mkdb/
 ├── client/                   # React + Vite frontend
 ├── discord-bot/              # mankbot — Discord.js slash commands
 ├── images/
-│   ├── posters/<slug>.jpg    # film posters (one-shot download, served by Express)
+│   ├── posters/<slug>.jpg          # film posters (one-shot download, served by Express)
+│   ├── placeholder-poster.svg      # SVG served in place of empty-stub posters (films Letterboxd has no artwork for)
 │   └── avatars/<username>.jpg, <username>-large.jpg
 └── dumps/                    # sync logs (`sync_YYYY-MM-DD.log`)
 ```
@@ -194,7 +195,7 @@ Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discord
 | `GET /films/nearmank/:rank` | Film at the given near-mank position (7–9 ratings, top 100) |
 | `GET /films/ratings?query=…` | Search a film and return its ratings histogram |
 | `GET /films/by-contributor?query=…&type=Director\|Actor` | Films by a director or actor, joined against MKDb |
-| `GET /posters-grid?slugs=…` | 4×2 JPEG composite of up to 8 film posters, generated on-demand by `sharp` |
+| `GET /posters-grid?slugs=…` | Adaptive PNG composite of 1-8 film posters (single row for 1-4, two rows for 5-8), generated on-demand by `sharp`. Slugs with no artwork fall back to the placeholder SVG. |
 
 ### Rate limits
 
@@ -218,7 +219,7 @@ mankbot exposes a single `/mkdb` slash command with subcommands. All replies are
 | `/mkdb director query:<text>` | Films directed by someone, matched against MKDb |
 | `/mkdb actor query:<text>` | Films an actor appeared in, matched against MKDb |
 
-`/mkdb director` and `/mkdb actor` page through the person's contributions on Letterboxd, intersect with MKDb, and present each page as a card with the contributor photo as a thumbnail plus a 4×2 poster composite (rendered by the `posters-grid` endpoint and uploaded as a Discord file attachment, so no public image URL is required).
+`/mkdb director` and `/mkdb actor` page through the person's contributions on Letterboxd, intersect with MKDb, and present each page as a card with the contributor photo as a thumbnail plus a poster composite — 1 to 8 tiles depending on how many films land on that page, rendered by the `posters-grid` endpoint and uploaded as a Discord file attachment so no public image URL is required.
 
 ## Production
 

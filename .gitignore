@@ -4,7 +4,8 @@ node_modules/
 dist/
 films/
 logs/
-images/
+images/*
+!images/placeholder-poster.svg
 dumps/
 .env
 

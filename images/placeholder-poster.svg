@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 230 345" preserveAspectRatio="xMidYMid meet">
+  <rect width="230" height="345" fill="#242424"/>
+  <g transform="translate(115, 172.5)" fill="#ffffff" fill-opacity="0.18" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2" stroke-linejoin="round">
+    <rect x="-40" y="-70" width="80" height="140" rx="2" fill="none"/>
+    <line x1="-30" y1="-23" x2="30" y2="-23"/>
+    <line x1="-30" y1="23" x2="30" y2="23"/>
+    <rect x="-37" y="-63" width="5" height="7" rx="1" stroke="none"/>
+    <rect x="-37" y="-41" width="5" height="7" rx="1" stroke="none"/>
+    <rect x="-37" y="-19" width="5" height="7" rx="1" stroke="none"/>
+    <rect x="-37" y="3"   width="5" height="7" rx="1" stroke="none"/>
+    <rect x="-37" y="25"  width="5" height="7" rx="1" stroke="none"/>
+    <rect x="-37" y="47"  width="5" height="7" rx="1" stroke="none"/>
+    <rect x="32"  y="-63" width="5" height="7" rx="1" stroke="none"/>
+    <rect x="32"  y="-41" width="5" height="7" rx="1" stroke="none"/>
+    <rect x="32"  y="-19" width="5" height="7" rx="1" stroke="none"/>
+    <rect x="32"  y="3"   width="5" height="7" rx="1" stroke="none"/>
+    <rect x="32"  y="25"  width="5" height="7" rx="1" stroke="none"/>
+    <rect x="32"  y="47"  width="5" height="7" rx="1" stroke="none"/>
+  </g>
+</svg>

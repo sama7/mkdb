@@ -78,6 +78,15 @@ button:focus-visible {
   /* adjust width to make the cards smaller */
 }
 
+/* Thin frame around every poster (real artwork + the SVG placeholder for
+   films with no Letterboxd poster). border-box keeps the rendered footprint
+   identical to a borderless image so existing layouts don't shift. */
+.film-poster {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
+  display: block;
+}
+
 .film-info {
   /* margin-top: 5px; */
   /* reduce margin */

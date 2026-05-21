@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import path from 'path';
+import { stat } from 'node:fs/promises';
 import sharp from 'sharp';
 import type { Request, Response } from 'express';
 import pool from '../db/conn.js';
@@ -8,7 +9,26 @@ import { apiRequest, paginate } from '../sync/lbx-client.js';
 import type { FilmDetailsResponse } from '../types/api.js';
 
 const POSTER_DIR = path.resolve('images/posters');
+const PLACEHOLDER_PATH = path.resolve('images/placeholder-poster.svg');
+const EMPTY_POSTER_BYTES = 118;   // sentinel: sync writes a ~118-byte empty-stub JPEG when Letterboxd has no poster
 const SLUG_RE = /^[a-z0-9-]+$/;
+
+/**
+ * Return the on-disk file path sharp should read for a given slug's poster:
+ * the real JPEG when it exists and is larger than the empty-stub sentinel,
+ * otherwise the SVG placeholder. Sharp decodes SVG via librsvg, so callers
+ * can pipe the result straight through .resize().toBuffer().
+ */
+async function resolvePosterFile(slug: string): Promise<string> {
+    const realPath = path.join(POSTER_DIR, `${slug}.jpg`);
+    try {
+        const st = await stat(realPath);
+        if (st.size > EMPTY_POSTER_BYTES) return realPath;
+    } catch {
+        // file missing — fall through to placeholder
+    }
+    return PLACEHOLDER_PATH;
+}
 
 interface ImageSize {
     width: number;
@@ -438,7 +458,11 @@ export const getPostersGrid = async (req: Request, res: Response) => {
         const tiles = await Promise.all(
             slugs.map(async (slug, i) => {
                 try {
-                    const buf = await sharp(path.join(POSTER_DIR, `${slug}.jpg`))
+                    // Missing or empty-stub posters resolve to the placeholder
+                    // SVG, so every requested slug yields a tile — the grid no
+                    // longer shrinks when a film has no Letterboxd artwork.
+                    const file = await resolvePosterFile(slug);
+                    const buf = await sharp(file)
                         .resize(CELL_W, CELL_H, { fit: 'cover' })
                         .toBuffer();
                     const { row, col, contentLeft } = slots[i];

@@ -1,6 +1,7 @@
 import express from 'express';
 import type { ErrorRequestHandler, Request } from 'express';
 import path from 'path';
+import { stat } from 'node:fs/promises';
 const __dirname = path.resolve();
 import 'dotenv/config';
 import rateLimit from 'express-rate-limit';
@@ -57,6 +58,28 @@ app.use(cors({
     origin: base_url,
     exposedHeaders: 'Retry-After',
 }));
+// Poster fallback: the sync writes a ~118-byte empty-stub JPEG for films
+// whose Letterboxd entry has no poster, which would otherwise render as a
+// blank box on the site. Intercept those (and any genuinely missing files)
+// and serve a minimalist film-strip SVG placeholder instead. Real posters
+// fall through to the static middleware below.
+const POSTER_DIR = path.join(__dirname, 'images', 'posters');
+const PLACEHOLDER_PATH = path.join(__dirname, 'images', 'placeholder-poster.svg');
+const EMPTY_POSTER_BYTES = 118;   // matches the sentinel size the sync writes
+const POSTER_SLUG_RE = /^([a-z0-9-]+)\.jpg$/;
+app.get('/images/posters/:filename', async (req, res, next) => {
+    if (!POSTER_SLUG_RE.test(req.params.filename)) return next();
+    try {
+        const st = await stat(path.join(POSTER_DIR, req.params.filename));
+        if (st.size > EMPTY_POSTER_BYTES) return next();   // real poster
+    } catch {
+        // file missing — fall through to placeholder
+    }
+    res.set('Content-Type', 'image/svg+xml');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.sendFile(PLACEHOLDER_PATH);
+});
+
 // Serve static files from the 'images' directory
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
