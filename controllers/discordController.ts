@@ -398,7 +398,7 @@ export const getPostersGrid = async (req: Request, res: Response) => {
     const CELL_W = 230, CELL_H = 345;
     const GAP = 6;
     const BLACK = { r: 0, g: 0, b: 0 };
-    const FRAME_COLOR = 'rgb(80,84,92)';   // medium gray — reads as separator against Discord's dark embed bg
+    const FRAME_COLOR = '#242424';   // matches mkdb.co body background (client/src/index.css)
 
     const { cols, rows, rowCounts } = gridLayout(slugs.length);
     const W = cols * CELL_W + (cols + 1) * GAP;
