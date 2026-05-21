@@ -354,19 +354,85 @@ export const filmsByContributor = async (req: Request, res: Response) => {
 };
 
 /**
+ * Pick a grid shape for `n` posters (1-8) that minimizes empty cells.
+ * Returns the canvas column count (the widest row) and per-row tile counts.
+ *
+ *   1 → 1×1     5 → top 3, bottom 2
+ *   2 → 2×1     6 → 3×2
+ *   3 → 3×1     7 → top 4, bottom 3
+ *   4 → 4×1     8 → 4×2
+ *
+ * Short rows are centered horizontally on the canvas (see getPostersGrid).
+ */
+function gridLayout(n: number): { cols: number; rows: number; rowCounts: number[] } {
+    if (n <= 1) return { cols: 1, rows: 1, rowCounts: [1] };
+    if (n === 2) return { cols: 2, rows: 1, rowCounts: [2] };
+    if (n === 3) return { cols: 3, rows: 1, rowCounts: [3] };
+    if (n === 4) return { cols: 4, rows: 1, rowCounts: [4] };
+    if (n === 5) return { cols: 3, rows: 2, rowCounts: [3, 2] };
+    if (n === 6) return { cols: 3, rows: 2, rowCounts: [3, 3] };
+    if (n === 7) return { cols: 4, rows: 2, rowCounts: [4, 3] };
+    return { cols: 4, rows: 2, rowCounts: [4, 4] };
+}
+
+/**
  * GET /api/discord/posters-grid?slugs=a,b,c,...
- * Renders up to 8 posters in a 4x2 JPEG grid for embedding in Discord.
+ * Renders 1-8 posters as a JPEG grid for embedding in Discord. The grid
+ * shape adapts to the slug count (see gridLayout) to avoid empty cells,
+ * and short rows are horizontally centered so the result reads as a single
+ * composition.
+ *
+ * Color rules:
+ * - Canvas background: black.
+ * - For each row, a medium-gray rectangle covers the row's posters plus a
+ *   6px frame on every side. That's what reads as the "gap lines" between
+ *   adjacent posters and the thin border around them.
+ * - When a row is narrower than the widest row (n=5, n=7), the canvas
+ *   extends past the gray frame and those margins stay black.
  */
 export const getPostersGrid = async (req: Request, res: Response) => {
     const raw = String(req.query.slugs ?? '');
     const slugs = raw.split(',').filter((s) => SLUG_RE.test(s)).slice(0, 8);
     if (slugs.length === 0) return res.status(400).json({ error: 'slugs required' });
 
-    const COLS = 4, ROWS = 2;
     const CELL_W = 230, CELL_H = 345;
     const GAP = 6;
-    const W = COLS * CELL_W + (COLS + 1) * GAP;
-    const H = ROWS * CELL_H + (ROWS + 1) * GAP;
+    const BLACK = { r: 0, g: 0, b: 0 };
+    const FRAME_COLOR = 'rgb(80,84,92)';   // medium gray — reads as separator against Discord's dark embed bg
+
+    const { cols, rows, rowCounts } = gridLayout(slugs.length);
+    const W = cols * CELL_W + (cols + 1) * GAP;
+    const H = rows * CELL_H + (rows + 1) * GAP;
+
+    // Per-row geometry. `contentLeft` is where this row's tile strip starts
+    // after centering; rows shorter than `cols` get pushed inward so their
+    // left/right margins are exposed (and stay black).
+    const rowGeometry = rowCounts.map((rowCount, row) => {
+        const contentW = rowCount * CELL_W + (rowCount - 1) * GAP;
+        const contentLeft = (W - contentW) / 2;
+        return { row, rowCount, contentLeft, contentW };
+    });
+
+    // One SVG with a gray rect per row, each rect = row's tile strip plus a
+    // 6px frame on every side. Sharp composites this over the black canvas
+    // before the actual poster tiles.
+    const frameRects = rowGeometry.map(({ row, contentLeft, contentW }) => {
+        const x = contentLeft - GAP;
+        const y = row * (CELL_H + GAP);
+        const w = contentW + 2 * GAP;
+        const h = CELL_H + 2 * GAP;
+        return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${FRAME_COLOR}"/>`;
+    }).join('');
+    const frameSvg = Buffer.from(
+        `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${frameRects}</svg>`,
+    );
+
+    // Flatten (rowIdx, colIdx, contentLeft) for every poster slot so we can
+    // map a slug index to its pixel position in one step.
+    const slots: { row: number; col: number; contentLeft: number }[] = [];
+    rowGeometry.forEach(({ row, rowCount, contentLeft }) => {
+        for (let col = 0; col < rowCount; col++) slots.push({ row, col, contentLeft });
+    });
 
     try {
         const tiles = await Promise.all(
@@ -375,10 +441,11 @@ export const getPostersGrid = async (req: Request, res: Response) => {
                     const buf = await sharp(path.join(POSTER_DIR, `${slug}.jpg`))
                         .resize(CELL_W, CELL_H, { fit: 'cover' })
                         .toBuffer();
+                    const { row, col, contentLeft } = slots[i];
                     return {
                         input: buf,
-                        left: GAP + (i % COLS) * (CELL_W + GAP),
-                        top: GAP + Math.floor(i / COLS) * (CELL_H + GAP),
+                        left: Math.round(contentLeft + col * (CELL_W + GAP)),
+                        top: GAP + row * (CELL_H + GAP),
                     };
                 } catch {
                     return null;
@@ -392,10 +459,13 @@ export const getPostersGrid = async (req: Request, res: Response) => {
                 width: W,
                 height: H,
                 channels: 3,
-                background: { r: 24, g: 25, b: 28 },
+                background: BLACK,
             },
         })
-            .composite(overlays)
+            .composite([
+                { input: frameSvg, left: 0, top: 0 },
+                ...overlays,
+            ])
             .jpeg({ quality: 82 })
             .toBuffer();
 
