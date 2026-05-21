@@ -2,6 +2,7 @@ import express from 'express';
 import type { ErrorRequestHandler, Request } from 'express';
 import path from 'path';
 import { stat } from 'node:fs/promises';
+import sharp from 'sharp';
 const __dirname = path.resolve();
 import 'dotenv/config';
 import rateLimit from 'express-rate-limit';
@@ -61,12 +62,23 @@ app.use(cors({
 // Poster fallback: the sync writes a ~118-byte empty-stub JPEG for films
 // whose Letterboxd entry has no poster, which would otherwise render as a
 // blank box on the site. Intercept those (and any genuinely missing files)
-// and serve a minimalist film-strip SVG placeholder instead. Real posters
-// fall through to the static middleware below.
+// and serve a rasterised PNG of the placeholder SVG. PNG (not SVG) because
+// Discord embed thumbnails only render raster formats — an SVG response
+// makes setThumbnail render nothing. Real posters fall through to the
+// static middleware below.
 const POSTER_DIR = path.join(__dirname, 'images', 'posters');
-const PLACEHOLDER_PATH = path.join(__dirname, 'images', 'placeholder-poster.svg');
+const PLACEHOLDER_SVG_PATH = path.join(__dirname, 'images', 'placeholder-poster.svg');
 const EMPTY_POSTER_BYTES = 118;   // matches the sentinel size the sync writes
 const POSTER_SLUG_RE = /^([a-z0-9-]+)\.jpg$/;
+
+// Lazy-rasterise the SVG to a 300×450 PNG buffer once, then reuse for every
+// missing-poster request. Sharp resolves SVG via librsvg.
+let placeholderPngPromise: Promise<Buffer> | null = null;
+function getPlaceholderPng(): Promise<Buffer> {
+    placeholderPngPromise ??= sharp(PLACEHOLDER_SVG_PATH).png().toBuffer();
+    return placeholderPngPromise;
+}
+
 app.get('/images/posters/:filename', async (req, res, next) => {
     if (!POSTER_SLUG_RE.test(req.params.filename)) return next();
     try {
@@ -75,9 +87,10 @@ app.get('/images/posters/:filename', async (req, res, next) => {
     } catch {
         // file missing — fall through to placeholder
     }
-    res.set('Content-Type', 'image/svg+xml');
+    const png = await getPlaceholderPng();
+    res.set('Content-Type', 'image/png');
     res.set('Cache-Control', 'public, max-age=3600');
-    res.sendFile(PLACEHOLDER_PATH);
+    res.send(png);
 });
 
 // Serve static files from the 'images' directory
