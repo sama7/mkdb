@@ -7,6 +7,7 @@ import {
 
 import type { MkdbSubCommand } from '../types.js';
 import { formatRuntime, truncateSynopsis } from './_format.js';
+import { fetchThumbAttachment } from './_thumbnail.js';
 
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
 const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
@@ -66,7 +67,7 @@ const subcommand: MkdbSubCommand = {
 
         const film = payload?.film;
         const slug = payload?.slug;
-        if (!film) {
+        if (!film || !slug) {
             return interaction.editReply('❌  Unexpected response from server.');
         }
 
@@ -84,11 +85,15 @@ const subcommand: MkdbSubCommand = {
             descParts.push(truncateSynopsis(film.synopsis, 500));
         }
 
+        // Fetch the thumbnail from the MKDb server and upload it inline so
+        // Discord doesn't have to reach a public URL — works against a local
+        // dev server too.
+        const thumb = await fetchThumbAttachment(slug);
+
         const embed = new EmbedBuilder()
             .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'})`)
             .setURL(`${MKDB_BASE_URL}/film/${slug}`)
             .setDescription(descParts.join('\n') || '—')
-            .setThumbnail(`https://mkdb.co/images/discord-thumb/${slug}.jpg`)
             .addFields(
                 { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
                 { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
@@ -96,7 +101,12 @@ const subcommand: MkdbSubCommand = {
             )
             .setFooter({ text: 'Metropolis Kino Database' });
 
-        return interaction.editReply({ embeds: [embed] });
+        if (thumb) embed.setThumbnail(thumb.thumbnailUrl);
+
+        return interaction.editReply({
+            embeds: [embed],
+            ...(thumb ? { files: [thumb.attachment] } : {}),
+        });
     },
 };
 

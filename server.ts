@@ -102,11 +102,24 @@ app.get('/images/posters/:filename', async (req, res, next) => {
 const DISCORD_THUMB_SVG = Buffer.from(
     '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">' +
     '<rect width="300" height="450" fill="#242424"/>' +
-    '<rect x="48" y="24" width="204" height="402" fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="10"/>' +
-    '<rect x="8" y="120" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
-    '<rect x="8" y="276" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
-    '<rect x="260" y="120" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
-    '<rect x="260" y="276" width="32" height="54" rx="5" fill="rgba(255,255,255,0.38)"/>' +
+    // outer body rectangle — 240×360 = 80% of canvas, centered. Sprockets nest inside it.
+    '<rect x="30" y="45" width="240" height="360" rx="6" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="7"/>' +
+    // 2 short horizontal divider lines — disconnected from the body sides, like the original
+    '<line x1="70" y1="165" x2="230" y2="165" stroke="rgba(255,255,255,0.18)" stroke-width="7"/>' +
+    '<line x1="70" y1="285" x2="230" y2="285" stroke="rgba(255,255,255,0.18)" stroke-width="7"/>' +
+    // 5 sprocket holes per side, equidistant (80 px center-to-center). Height
+    // 26 (instead of 30) so the dividers at y=165 / y=285 fit cleanly in the
+    // gaps between sprockets 2-3 and 3-4 without visually touching them.
+    '<rect x="39" y="52" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="39" y="132" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="39" y="212" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="39" y="292" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="39" y="372" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="237" y="52" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="237" y="132" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="237" y="212" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="237" y="292" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
+    '<rect x="237" y="372" width="24" height="26" rx="3" fill="rgba(255,255,255,0.18)"/>' +
     '</svg>'
 );
 
@@ -118,11 +131,19 @@ function getDiscordThumbPng(): Promise<Buffer> {
 
 app.get('/images/discord-thumb/:filename', async (req, res, next) => {
     if (!POSTER_SLUG_RE.test(req.params.filename)) return next();
+    const realPath = path.join(POSTER_DIR, req.params.filename);
     try {
-        const st = await stat(path.join(POSTER_DIR, req.params.filename));
-        if (st.size > EMPTY_POSTER_BYTES) return next();   // real poster
+        const st = await stat(realPath);
+        if (st.size > EMPTY_POSTER_BYTES) {
+            // Real poster lives under /images/posters/, not /images/discord-thumb/.
+            // Falling through to the static middleware would have it look for
+            // the file at the request path (which doesn't exist) and 404 —
+            // serve directly instead.
+            res.set('Cache-Control', 'public, max-age=86400');
+            return res.sendFile(realPath);
+        }
     } catch {
-        // file missing — fall through to simple placeholder
+        // file missing — fall through to simple placeholder below
     }
     const png = await getDiscordThumbPng();
     res.set('Content-Type', 'image/png');

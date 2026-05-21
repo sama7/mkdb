@@ -11,6 +11,7 @@ import {
 } from 'discord.js';
 
 import type { MkdbSubCommand } from '../types.js';
+import { fetchThumbAttachment } from './_thumbnail.js';
 
 const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
 const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
@@ -84,6 +85,12 @@ const subcommand: MkdbSubCommand = {
             return interaction.editReply('❌ Unexpected response from server.');
         }
 
+        // Fetch the thumbnail from the MKDb server and upload it inline so
+        // Discord doesn't have to reach a public URL — works against a local
+        // dev server too. Pagination edits below don't re-pass `files`, so
+        // Discord keeps this attachment alive across page changes.
+        const thumb = await fetchThumbAttachment(slug);
+
         // Pre-compute a flat list of lines grouped by star value: each
         // group starts with a bold star header followed by user lines.
         const starOrder = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1, 0.5];
@@ -124,10 +131,9 @@ const subcommand: MkdbSubCommand = {
                 slice.pop();
             }
 
-            return new EmbedBuilder()
+            const embed = new EmbedBuilder()
                 .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'}) — Community ratings`)
                 .setURL(`${MKDB_BASE_URL}/film/${slug}`)
-                .setThumbnail(`https://mkdb.co/images/discord-thumb/${slug}.jpg`)
                 .setDescription(slice.join('\n'))
                 .addFields(
                     { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
@@ -135,6 +141,8 @@ const subcommand: MkdbSubCommand = {
                     { name: 'MKDb rank', value: film.current_rank ? `#${film.current_rank}` : '—', inline: true },
                 )
                 .setFooter({ text: `Page ${page + 1}/${TOTAL_PAGES}` });
+            if (thumb) embed.setThumbnail(thumb.thumbnailUrl);
+            return embed;
         };
 
         let page = 0;
@@ -154,6 +162,7 @@ const subcommand: MkdbSubCommand = {
         const message = await interaction.editReply({
             embeds: [buildEmbed(page)],
             components: [row],
+            ...(thumb ? { files: [thumb.attachment] } : {}),
         });
 
         const collector = message.createMessageComponentCollector({
