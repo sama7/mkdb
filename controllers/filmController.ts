@@ -5,6 +5,15 @@ import type { GenreFilters, RankingFilters } from '../types/api.js';
 const MAX_LIMIT = 500;
 type SqlParam = string | number | string[];
 
+// LANK_USERS: comma-separated list of usernames defining the "lank" subset
+// used by /api/lank. Usernames not present in `users` (i.e. not followed by
+// metrodb) are filtered out naturally by the JOIN in the SQL below. Read
+// once at module-load; .env doesn't change at runtime.
+const LANK_USERS = (process.env.LANK_USERS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 function clampLimit(raw: unknown, defaultValue: number): number {
     const n = Number(raw);
     if (!Number.isFinite(n) || n <= 0) return defaultValue;
@@ -269,6 +278,131 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
         res.json(rows);
     } catch (error) {
         console.error('Error fetching bottom film rankings:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+// Top film rankings restricted to ratings from the LANK_USERS subset of
+// metrodb followers. Mirrors getFilmRankings but joins the ratings against
+// `users` and filters by username. minRatings default is 5 (instead of 10)
+// because the lank pool is far smaller than the full community, so a higher
+// floor would empty out the top-1000 page.
+export const getLankFilmRankings = async (req: Request, res: Response) => {
+    try {
+        const filters = parseRankingFilters(req.query.filters);
+
+        const {
+            page = 1,
+            minYear,
+            maxYear,
+            minRatings = 5,
+            maxRatings,
+            limit: rawLimit,
+            genres = {}
+        } = { ...filters, ...req.query } as RankingFilters;
+
+        const limit = clampLimit(rawLimit, 100);
+        const offset = (Number(page) - 1) * limit;
+        const queryParams: SqlParam[] = [LANK_USERS];   // $1
+        let paramIndex = 2;
+
+        let query = `
+            SELECT
+                total_count,
+                ROW_NUMBER() OVER (ORDER BY (average_rating) DESC, (rating_count) DESC) AS ranking,
+                title,
+                year,
+                slug,
+                genres,
+                average_rating,
+                rating_count
+            FROM (
+                SELECT
+                    f.title,
+                    f.year,
+                    f.slug,
+                    f.genres,
+                    AVG(r.rating) AS average_rating,
+                    COUNT(r.rating) AS rating_count,
+                    COUNT(*) OVER() AS total_count
+                FROM
+                    films f
+                JOIN
+                    ratings r ON f.film_id = r.film_id
+                JOIN
+                    users u ON r.user_id = u.user_id
+                WHERE f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
+                  AND u.username = ANY($1::text[])
+        `;
+
+        const conditions = [];
+
+        if (minYear) {
+            conditions.push(`f.year >= $${paramIndex++}`);
+            queryParams.push(minYear);
+        }
+        if (maxYear) {
+            conditions.push(`f.year <= $${paramIndex++}`);
+            queryParams.push(maxYear);
+        }
+
+        const includeGenres: string[] = [];
+        const excludeGenres: string[] = [];
+
+        genreEntries(genres).forEach(([genre, mode]) => {
+            if (mode === 'include') {
+                includeGenres.push(genre);
+            } else if (mode === 'exclude') {
+                excludeGenres.push(genre);
+            }
+        });
+
+        if (includeGenres.length > 0) {
+            conditions.push(`f.genres @> $${paramIndex++}::text[]`);
+            queryParams.push(includeGenres);
+        }
+
+        if (excludeGenres.length > 0) {
+            conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
+            queryParams.push(excludeGenres);
+        }
+
+        if (conditions.length > 0) {
+            query += ` AND ${conditions.join(' AND ')} `;
+        }
+
+        query += `
+                GROUP BY
+                    f.film_id, f.title, f.year, f.slug, f.genres
+        `;
+
+        const havingConditions = [];
+
+        if (minRatings) {
+            havingConditions.push(`COUNT(r.rating) >= $${paramIndex++}`);
+            queryParams.push(minRatings);
+        }
+        if (maxRatings) {
+            havingConditions.push(`COUNT(r.rating) <= $${paramIndex++}`);
+            queryParams.push(maxRatings);
+        }
+
+        if (havingConditions.length > 0) {
+            query += ` HAVING ${havingConditions.join(' AND ')} `;
+        }
+
+        query += `
+            ) subquery
+            ORDER BY average_rating DESC, rating_count DESC
+            LIMIT $${paramIndex++} OFFSET $${paramIndex++};
+        `;
+
+        queryParams.push(limit, offset);
+
+        const { rows } = await pool.query(query, queryParams);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching lank film rankings:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 };

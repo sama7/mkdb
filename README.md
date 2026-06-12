@@ -86,6 +86,7 @@ DB_PORT=5432
 PORT=3000
 NODE_ENV=                 # set to "production" on the VPS
 RATE_LIMIT_SKIP_IPS=      # optional, comma-separated IPs exempt from rate limiting (loopback already exempt)
+LANK_USERS=               # comma-separated usernames defining the /lank subset (usernames not followed by metrodb are ignored)
 ```
 
 The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, one or more `guildId*` entries, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`. `deploy-commands` picks up every env var matching `/^guildId/i` and PUTs the same command set to each — so prod can register slash commands across multiple servers (e.g. `guildIdMetro=...`, `guildIdLycan=...`) with no code change. We prefer guild-scoped registration because it propagates instantly; global commands sit in Discord's CDN cache for up to an hour.
@@ -185,6 +186,7 @@ Site routes (mounted at `/api`, see [`routes/filmRoutes.ts`](routes/filmRoutes.t
 | `GET /neighbors-agreed/:a/:b` | Films two neighbors rated similarly |
 | `GET /neighbors-differ/:a/:b` | Films two neighbors disagreed on |
 | `GET /evil-mank` | Bottom-ranked films (inverse of `/rankings`) |
+| `GET /lank` | Same as `/rankings` but restricted to ratings from the `LANK_USERS` subset of metrodb followers |
 
 Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discordRoutes.ts`](routes/discordRoutes.ts)):
 

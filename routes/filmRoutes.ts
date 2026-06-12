@@ -42,4 +42,7 @@ router.get('/neighbors-differ/:username_a/:username_b', filmController.getNeighb
 // GET /api/evil-mank - Retrieve top film rankings with optional filters
 router.get('/evil-mank', filmController.getEvilMankFilmRankings);
 
+// GET /api/lank - Top film rankings restricted to ratings from the LANK_USERS subset
+router.get('/lank', filmController.getLankFilmRankings);
+
 export default router;

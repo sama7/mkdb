@@ -5,6 +5,7 @@ import FilmGrid from './components/FilmGrid';
 import FilmDetails from './components/FilmDetails';
 import WhatsNew from './components/WhatsNew';
 import FilmGridEvilMank from './components/FilmGridEvilMank';
+import FilmGridLank from './components/FilmGridLank';
 import Masterlist from './components/Masterlist';
 import Members from './components/Members';
 import MemberDetails from './components/MemberDetails';
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/members/:username_a/:username_b" element={<NeighborDetails />} />
             <Route path="/masterlist" element={<Masterlist />} />
             <Route path="/evil-mank" element={<FilmGridEvilMank />} />
+            <Route path="/lank" element={<FilmGridLank />} />
           </Routes>
         </div>
     </Router>
