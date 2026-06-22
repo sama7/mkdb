@@ -158,14 +158,24 @@ nohup npm run sync > dumps/sync_$(date +%F).log 2>&1 &
 nohup npm run promote > dumps/promote_$(date +%F).log 2>&1 &
 ```
 
-In production both stages run on a weekly cron — sync at Sun 11:00 PM ET, promote at Mon 12:00 AM ET. The source of truth is [`scripts/mkdb.crontab`](scripts/mkdb.crontab); install (or re-install on a new VPS) with:
+In production both stages run on a weekly cron — the **sync scheduler** at Sun 5:00 PM ET, promote at Mon 12:00 AM ET. The source of truth is [`scripts/mkdb.crontab`](scripts/mkdb.crontab); install (or re-install on a new VPS) with:
 
 ```bash
 crontab scripts/mkdb.crontab
 crontab -l                # verify
 ```
 
-The VPS timezone must be `America/New_York` (`timedatectl` to check, `timedatectl set-timezone America/New_York` to fix). The 1-hour gap between sync start and promote assumes sync finishes well under an hour (last run: 47 min). If sync ever creeps toward 60 min, widen the gap in the crontab — promoting while sync is still writing into staging would corrupt the swap.
+The VPS timezone must be `America/New_York` (`timedatectl` to check, `timedatectl set-timezone America/New_York` to fix).
+
+**Dynamic sync start time.** The sync no longer fires at a fixed clock time. Cron instead fires a wrapper ([`scripts/scheduled-sync.ts`](scripts/scheduled-sync.ts)) at Sun 5:00 PM ET that:
+
+1. Reads the last 5 `dumps/sync_*.log` files, parses each `[sync] done in …` line
+2. Computes `target_start = next_midnight − max(prior 5 durations) − 30 min`
+3. Sleeps until `target_start`, then spawns `npm run sync`
+
+So if the longest of the last 5 syncs took 1h 10m, sync starts at 10:20 PM (midnight − 1h 10m − 30m). If a week's sync is genuinely 4 hours, the next week's sync starts at 7:30 PM automatically — no crontab edit needed. The 5 PM cron-fire time gives the wrapper up to 7 hours of headroom to sleep, which covers any realistic max. If you ever exceed that, the wrapper logs a warning and starts sync immediately.
+
+Tuning knobs live at the top of [`scripts/scheduled-sync.ts`](scripts/scheduled-sync.ts) — `LOOKBACK` (default 5 weeks), `BUFFER_MS` (default 30 min), `FALLBACK_DURATION_MS` (used when no prior logs exist).
 
 Throughput: ~120 films/min for full detail fetches (measured during the initial backfill of ~59k films, which took ~9 hours). Steady-state weekly syncs only hit the detail endpoint for genuinely new films (`details_fetched_at IS NULL`); the bulk of runtime is paginating each member's ratings.
 
