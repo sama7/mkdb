@@ -106,13 +106,14 @@ const FilmDetails = () => {
 
     return (
         <div className="film-details container">
-            <h3><i>{film.title}</i> ({film.year})</h3>
+            <h3><i>{film.title}</i></h3>
             <a href={`https://letterboxd.com/film/${slug}`} target="_blank" rel="noopener noreferrer">
                 <img className='film-poster' src={`/images/posters/${slug}.jpg`} alt={`${film.title} (${film.year})`} title={`${film.title} (${film.year})`} />
             </a>
-            {/* Directors, Genres, Countries, Languages, Runtime (compact) */}
+            {/* Year, Directors, Genres, Countries, Languages, Runtime (compact) */}
             {(() => {
                 const metaLines = [];
+                if (film.year)              metaLines.push(String(film.year));
                 if (film.directors?.length) metaLines.push(film.directors.join(', '));
                 if (film.genres?.length)    metaLines.push(film.genres.join(', '));
                 if (film.countries?.length) metaLines.push(film.countries.join(', '));
