@@ -6,7 +6,7 @@ import type { Film, Rating } from '../types';
 import { useNetwork } from '../network';
 
 const FilmDetails = () => {
-    const { apiBase, urlBase } = useNetwork();
+    const { apiBase, urlBase, network } = useNetwork();
     const { slug } = useParams();
     const [film, setFilm] = useState<Film | null>(null);
     const [ratings, setRatings] = useState<Rating[]>([]);
@@ -130,10 +130,10 @@ const FilmDetails = () => {
                 ) : null;
             })()}
             <p>{film.synopsis}</p>
-            {/* MKDb Rank */}
+            {/* Rank label switches based on the active network. */}
             <div className="rank-section">
 
-                <p><span className='big-rank'>MKDb Rank: {film.current_rank ? film.current_rank : 'N/A'}</span> {rankChange}</p>
+                <p><span className='big-rank'>{network === 'lank' ? 'Lycan' : 'MKDb'} Rank: {film.current_rank ? film.current_rank : 'N/A'}</span> {rankChange}</p>
                 {rankIndicator}
                 {ultramankIndicator}
             </div>
