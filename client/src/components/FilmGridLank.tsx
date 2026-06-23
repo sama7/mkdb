@@ -84,7 +84,7 @@ const FilmGridLank = () => {
 
     return (
         <div className="mb-4">
-            <h3 className="my-3">Top Lanked Films</h3>
+            <h3 className="my-3">Top Ranked Films</h3>
             <Filters filters={filters} onFiltersChange={handleFiltersChange} />
             <div className="film-grid container" style={{
                 display: 'grid',
