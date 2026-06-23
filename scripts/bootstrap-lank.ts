@@ -180,7 +180,7 @@ async function appendLankRankingsAndSimilarity(): Promise<void> {
         )
         INSERT INTO film_rankings_history (film_id, ranking, week, network, week_computed_at)
         SELECT f.film_id,
-               ROW_NUMBER() OVER (ORDER BY AVG(r.rating) DESC, COUNT(r.rating) DESC) AS ranking,
+               ROW_NUMBER() OVER (ORDER BY AVG(r.rating) DESC, COUNT(r.rating) DESC, f.film_id ASC) AS ranking,
                (SELECT w FROM current_week),
                'lank',
                NOW()

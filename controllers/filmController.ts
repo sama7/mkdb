@@ -56,10 +56,14 @@ async function _getFilmRankings(req: Request, res: Response, network: Network) {
         const queryParams: SqlParam[] = [];
         let paramIndex = 1;
 
+        // film_id is included in the inner SELECT and used as a tiebreaker in
+        // the ORDER BY / ROW_NUMBER below so films tied on (average_rating,
+        // rating_count) get a deterministic rank. without it, the grid and
+        // film-details page could disagree by 1 on tied films.
         let query = `
             SELECT
                 total_count,
-                ROW_NUMBER() OVER (ORDER BY (average_rating) DESC, (rating_count) DESC) AS ranking,
+                ROW_NUMBER() OVER (ORDER BY (average_rating) DESC, (rating_count) DESC, film_id ASC) AS ranking,
                 title,
                 year,
                 slug,
@@ -68,6 +72,7 @@ async function _getFilmRankings(req: Request, res: Response, network: Network) {
                 rating_count
             FROM (
                 SELECT
+                    f.film_id,
                     f.title,
                     f.year,
                     f.slug,
@@ -131,7 +136,7 @@ async function _getFilmRankings(req: Request, res: Response, network: Network) {
 
         query += `
             ) subquery
-            ORDER BY average_rating DESC, rating_count DESC
+            ORDER BY average_rating DESC, rating_count DESC, film_id ASC
             LIMIT $${paramIndex++} OFFSET $${paramIndex++};
         `;
         queryParams.push(limit, offset);
@@ -167,13 +172,15 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
         const queryParams: SqlParam[] = [];
         let paramIndex = 1;
 
+        // film_id as deterministic tiebreaker (see _getFilmRankings for why).
         let query = `
             SELECT
                 total_count,
-                ROW_NUMBER() OVER (ORDER BY (average_rating) ASC, (rating_count) DESC) AS ranking,
+                ROW_NUMBER() OVER (ORDER BY (average_rating) ASC, (rating_count) DESC, film_id ASC) AS ranking,
                 title, year, slug, genres, average_rating, rating_count
             FROM (
                 SELECT
+                    f.film_id,
                     f.title, f.year, f.slug, f.genres,
                     AVG(r.rating) AS average_rating,
                     COUNT(r.rating) AS rating_count,
@@ -213,7 +220,7 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
 
         query += `
             ) subquery
-            ORDER BY average_rating ASC, rating_count DESC
+            ORDER BY average_rating ASC, rating_count DESC, film_id ASC
             LIMIT $${paramIndex++} OFFSET $${paramIndex++};
         `;
         queryParams.push(limit, offset);
