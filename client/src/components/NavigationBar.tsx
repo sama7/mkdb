@@ -12,7 +12,7 @@ function NavigationBar() {
   return (
     <Navbar data-bs-theme="dark" expand="lg" className="bg-body-tertiary ps-3 pe-3" sticky="top">
         <Navbar.Brand href={isLank ? '/lank' : '/'}>
-          {isLank ? 'Metropolis Kino Database (Lank)' : 'Metropolis Kino Database'}
+          {isLank ? 'Lycan Kino Database' : 'Metropolis Kino Database'}
         </Navbar.Brand>
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
         <Navbar.Collapse id="basic-navbar-nav">
