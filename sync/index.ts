@@ -6,15 +6,20 @@ import { syncNewFilms } from './sync-films.js';
 
 // Orchestrator order matters:
 // 0. Truncate staging tables so each run starts clean.
-// 1. Enumerate the metrodb-following community into users_stg.
+// 1a. Enumerate the metrodb-following community into users_stg (is_metro=true).
+// 1b. Enumerate the lycandb-following community, OR-merging is_lycan=true
+//     onto existing rows. Users followed by both end up with both flags set
+//     on one row (no duplication of users or ratings).
 // 2. Pull every member's ratings into ratings_stg, stubbing new films into `films`.
+//    Network-agnostic — a user in users_stg is pulled once regardless of which
+//    network(s) they belong to.
 // 3. Sync film details + posters for all new films (details_fetched_at IS NULL).
 //
-// Promote (swap staging → live, recompute similarity, append the new ranking
-// week, trim history to 3 weeks, delete orphan films + their posters) is run
-// SEPARATELY via `npm run promote`. The two stages are scheduled by cron at
-// different times (sync Sunday 23:00 ET, promote Monday 00:00 ET) so they
-// can be timed and monitored independently.
+// Promote (swap staging → live, recompute similarity per network, append the
+// new ranking week per network, trim history to 3 weeks, delete orphan films
+// + their posters) is run SEPARATELY via `npm run promote`. The two stages
+// are scheduled by cron at different times so they can be timed and monitored
+// independently.
 
 function formatDuration(ms: number): string {
     const totalSeconds = Math.floor(ms / 1000);
@@ -34,8 +39,10 @@ async function main() {
     console.log('[sync] staging tables cleared');
 
     const tDiscover = Date.now();
-    const memberCount = await discoverMembers();
-    console.log(`[sync] discovered ${memberCount} members in ${formatDuration(Date.now() - tDiscover)}`);
+    const metroCount = await discoverMembers({ seed: 'metrodb', isMetro: true });
+    const lycanCount = await discoverMembers({ seed: 'lycandb', isLycan: true });
+    const { rows: [{ total }] } = await pool.query<{ total: string }>('SELECT COUNT(*) AS total FROM users_stg');
+    console.log(`[sync] discovered metro=${metroCount}, lycan=${lycanCount}, union=${total} members in ${formatDuration(Date.now() - tDiscover)}`);
 
     const tRatings = Date.now();
     const { totalIngested } = await syncAllRatings();

@@ -4,7 +4,6 @@ import pool from '../db/conn.js';
 import { apiRequest, paginate } from './lbx-client.js';
 import { downloadImage } from './download-image.js';
 
-const SEED_USERNAME = 'metrodb';
 const AVATAR_DIR = path.resolve('images/avatars');
 
 interface LetterboxdImageSize {
@@ -25,13 +24,19 @@ interface MemberSearchResponse {
     items?: Array<{ member?: LetterboxdMember }>;
 }
 
-async function resolveSeedLid(): Promise<string> {
+export interface DiscoverOpts {
+    seed: string;          // Letterboxd username of the account whose follows we ingest
+    isMetro?: boolean;     // mark each ingested member with is_metro = true
+    isLycan?: boolean;     // mark each ingested member with is_lycan = true
+}
+
+async function resolveSeedLid(username: string): Promise<string> {
     const j = await apiRequest<MemberSearchResponse>('GET', '/search', {
-        query: { input: SEED_USERNAME, include: 'MemberSearchItem', searchMethod: 'Autocomplete', perPage: '1' },
+        query: { input: username, include: 'MemberSearchItem', searchMethod: 'Autocomplete', perPage: '1' },
     });
     const member = j.items?.[0]?.member;
     if (!member?.id) {
-        throw new Error(`Could not resolve seed username "${SEED_USERNAME}" to a Letterboxd LID`);
+        throw new Error(`Could not resolve seed username "${username}" to a Letterboxd LID`);
     }
     return member.id;
 }
@@ -54,17 +59,23 @@ async function downloadAvatar(username: string, url: string, suffix = ''): Promi
     }
 }
 
-async function upsertMember(member: LetterboxdMember): Promise<void> {
+async function upsertMember(member: LetterboxdMember, isMetro: boolean, isLycan: boolean): Promise<void> {
     const username = String(member.username || '').toLowerCase();
     const displayName = member.displayName || member.username || '';
+
+    // OR-merge the network flags on conflict: if the same user appears in
+    // both metrodb's and lycandb's follows (current overlap: 25 users), the
+    // first discover call sets one flag, the second OR-merges the other.
     await pool.query(
-        `INSERT INTO users_stg (letterboxd_id, username, display_name, num_films_watched, time_created, time_modified)
-         VALUES ($1, $2, $3, NULL, NOW(), NOW())
+        `INSERT INTO users_stg (letterboxd_id, username, display_name, num_films_watched, is_metro, is_lycan, time_created, time_modified)
+         VALUES ($1, $2, $3, NULL, $4, $5, NOW(), NOW())
          ON CONFLICT (letterboxd_id) DO UPDATE
-            SET username = EXCLUDED.username,
-                display_name = EXCLUDED.display_name,
+            SET username      = EXCLUDED.username,
+                display_name  = EXCLUDED.display_name,
+                is_metro      = users_stg.is_metro OR EXCLUDED.is_metro,
+                is_lycan      = users_stg.is_lycan OR EXCLUDED.is_lycan,
                 time_modified = NOW()`,
-        [member.id, username, displayName],
+        [member.id, username, displayName, isMetro, isLycan],
     );
 
     const smallUrl = pickAvatarUrl(member, false);
@@ -73,23 +84,30 @@ async function upsertMember(member: LetterboxdMember): Promise<void> {
     if (largeUrl) await downloadAvatar(username, largeUrl, '-large');
 }
 
-export async function discoverMembers(): Promise<number> {
-    const seedLid = await resolveSeedLid();
-    console.log(`[discover] seed ${SEED_USERNAME} -> ${seedLid}`);
+export async function discoverMembers(opts: DiscoverOpts): Promise<number> {
+    const { seed, isMetro = false, isLycan = false } = opts;
+    if (!isMetro && !isLycan) {
+        throw new Error(`discoverMembers({ seed: "${seed}" }) needs at least one of isMetro / isLycan`);
+    }
+
+    const seedLid = await resolveSeedLid(seed);
+    const flags = [isMetro && 'metro', isLycan && 'lycan'].filter(Boolean).join('+');
+    console.log(`[discover] seed ${seed} -> ${seedLid} (flags: ${flags})`);
 
     let count = 0;
     for await (const member of paginate<LetterboxdMember>('/members', { member: seedLid, memberRelationship: 'IsFollowing', perPage: '100' })) {
         if (!member?.id || !member?.username) continue;
-        await upsertMember(member);
+        await upsertMember(member, isMetro, isLycan);
         count++;
-        if (count % 50 === 0) console.log(`[discover] ingested ${count} members so far`);
+        if (count % 50 === 0) console.log(`[discover] ${seed}: ingested ${count} members so far`);
     }
-    console.log(`[discover] done: ${count} members in users_stg`);
+    console.log(`[discover] ${seed} done: ${count} members upserted into users_stg`);
     return count;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-    discoverMembers()
+    // CLI entry retained for ad-hoc runs of just the metro discover step.
+    discoverMembers({ seed: 'metrodb', isMetro: true })
         .then(() => pool.end())
         .catch((err) => {
             console.error('[discover] fatal:', err);

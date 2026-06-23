@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { User } from '../types';
+import { useNetwork } from '../network';
 
 type MemberRow = User & {
     num_films_watched: number;
@@ -10,6 +11,7 @@ interface MembersRowsProps {
 }
 
 export default function MembersRows(props: MembersRowsProps) {
+    const { urlBase } = useNetwork();
 
     const members = props.members?.map((member, index: number) => {
         return (
@@ -22,7 +24,7 @@ export default function MembersRows(props: MembersRowsProps) {
                             className="user-avatar"
                         />
                         <span className="username">
-                            <Link to={`/members/${member.username}`}>
+                            <Link to={`${urlBase}/members/${member.username}`}>
                                 {member.display_name}
                             </Link>
                         </span>

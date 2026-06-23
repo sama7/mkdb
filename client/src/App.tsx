@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Outlet, Route, Routes } from 'react-router-dom';
 import './App.css';
 import NavigationBar from './components/NavigationBar';
 import FilmGrid from './components/FilmGrid';
@@ -10,6 +10,7 @@ import Masterlist from './components/Masterlist';
 import Members from './components/Members';
 import MemberDetails from './components/MemberDetails';
 import NeighborDetails from './components/NeighborDetails';
+import { NetworkProvider } from './network';
 
 export default function App() {
   return (
@@ -25,7 +26,18 @@ export default function App() {
             <Route path="/members/:username_a/:username_b" element={<NeighborDetails />} />
             <Route path="/masterlist" element={<Masterlist />} />
             <Route path="/evil-mank" element={<FilmGridEvilMank />} />
-            <Route path="/lank" element={<FilmGridLank />} />
+
+            {/* Lank subtree — every nested route runs under network='lank', so
+                shared components (FilmDetails, WhatsNew, Members, NeighborDetails)
+                fetch /api/lank/* and produce /lank/* internal links automatically. */}
+            <Route path="/lank" element={<NetworkProvider network="lank"><Outlet /></NetworkProvider>}>
+              <Route index element={<FilmGridLank />} />
+              <Route path="film/:slug" element={<FilmDetails />} />
+              <Route path="new" element={<WhatsNew />} />
+              <Route path="members" element={<Members />} />
+              <Route path="members/:username" element={<MemberDetails />} />
+              <Route path="members/:username_a/:username_b" element={<NeighborDetails />} />
+            </Route>
           </Routes>
         </div>
     </Router>

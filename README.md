@@ -60,11 +60,22 @@ Key tables (all live in the `mkdb` database):
 | Table | Purpose |
 |---|---|
 | `films` | Film metadata. PK `film_id`, unique `slug` and `letterboxd_id`. `details_fetched_at` gates re-fetching. |
-| `users` | Community members. PK `user_id`, unique `username` and `letterboxd_id`. |
-| `ratings` | `UNIQUE (user_id, film_id)`, `rating numeric(2,1) CHECK 0.5–5.0`. |
-| `user_similarity_scores` | `(user_a, user_b)`, `overlap_count`, `avg_rating_distance`, `similarity_score`. Symmetric. |
-| `film_rankings_history` | `(film_id, week)`. Monotonic `week` counter; trimmed to last 3 weeks on each promote. |
+| `users` | Community members. PK `user_id`, unique `username` and `letterboxd_id`. `is_metro` / `is_lycan` bool flags track which network(s) a user belongs to (a user can be in both). |
+| `ratings` | `UNIQUE (user_id, film_id)`, `rating numeric(2,1) CHECK 0.5–5.0`. Shared across networks — no duplication for users in both. |
+| `user_similarity_scores` | `(user_a, user_b, network)`, `overlap_count`, `avg_rating_distance`, `similarity_score`. Symmetric. One row per pair per network. |
+| `film_rankings_history` | `(film_id, week, network)`. Monotonic `week` counter; trimmed to last 3 weeks per network on each promote. |
 | `users_stg`, `ratings_stg` | Staging mirrors. Truncated at start of each sync, swapped in by promote. |
+
+## Networks (metro vs lank)
+
+Two parallel communities ride on the same `users` / `ratings` / `films` tables:
+
+- **metro** (default) — the films-and-ratings pool from everyone the `metrodb` Letterboxd account follows. Surfaced at `mkdb.co` (`/`, `/film/...`, `/new`, `/members`, `/masterlist`, `/evil-mank`).
+- **lank** — same pool restricted to users followed by the `lycandb` Letterboxd account. Surfaced at `mkdb.co/lank` (`/lank`, `/lank/film/...`, `/lank/new`, `/lank/members`).
+
+The two seeds overlap (~25 users at time of writing). A user followed by both is stored once with `is_metro = is_lycan = true`; their ratings sync once. Each sync's discover step calls Letterboxd's API for both seeds in turn and OR-merges the network flags into one `users_stg` row per Letterboxd ID.
+
+Each promote computes two ranking snapshots (one per network) into `film_rankings_history` and two similarity-score sets into `user_similarity_scores`. The week counter is shared so both networks advance in lockstep. metro's HAVING floor is `>= 10` raters (community is ~340 users); lank lowers it to `>= 5` since the lycan pool is ~10× smaller.
 
 ## Environment variables
 
@@ -86,8 +97,9 @@ DB_PORT=5432
 PORT=3000
 NODE_ENV=                 # set to "production" on the VPS
 RATE_LIMIT_SKIP_IPS=      # optional, comma-separated IPs exempt from rate limiting (loopback already exempt)
-LANK_USERS=               # comma-separated usernames defining the /lank subset (usernames not followed by metrodb are ignored)
 ```
+
+The `/lank` subset is no longer configured via env — it's the set of users followed by the `lycandb` Letterboxd account, discovered automatically each sync. See "Networks (metro vs lank)" below.
 
 The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, one or more `guildId*` entries, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`. `deploy-commands` picks up every env var matching `/^guildId/i` and PUTs the same command set to each — so prod can register slash commands across multiple servers (e.g. `guildIdMetro=...`, `guildIdLycan=...`) with no code change. We prefer guild-scoped registration because it propagates instantly; global commands sit in Discord's CDN cache for up to an hour.
 
@@ -196,7 +208,13 @@ Site routes (mounted at `/api`, see [`routes/filmRoutes.ts`](routes/filmRoutes.t
 | `GET /neighbors-agreed/:a/:b` | Films two neighbors rated similarly |
 | `GET /neighbors-differ/:a/:b` | Films two neighbors disagreed on |
 | `GET /evil-mank` | Bottom-ranked films (inverse of `/rankings`) |
-| `GET /lank` | Same as `/rankings` but restricted to ratings from the `LANK_USERS` subset of metrodb followers |
+| `GET /lank` | Top-ranked films restricted to the **lank** subset (users followed by `lycandb`) |
+| `GET /lank/film/:slug` | Film details for the lank subset (lank rank, lank ratings only) |
+| `GET /lank/risers`, `/lank/fallers`, `/lank/new-entries`, `/lank/new-departures` | Lank-only what's-new endpoints |
+| `GET /lank/members` | Lank members listing (paginated) |
+| `GET /lank/members/:username` | Lank member profile |
+| `GET /lank/member/:username` | Lank member's nearest neighbors |
+| `GET /lank/neighbors/:a/:b`, `/lank/neighbors-agreed/:a/:b`, `/lank/neighbors-differ/:a/:b` | Lank-context neighbor comparison |
 
 Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discordRoutes.ts`](routes/discordRoutes.ts)):
 

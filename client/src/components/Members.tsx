@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useEffect } from 'react';
 import Spinner from 'react-bootstrap/Spinner';
 import type { MemberSort, User } from '../types';
+import { useNetwork } from '../network';
 
 type MemberListRow = User & {
     total_count: string;
@@ -12,6 +13,7 @@ type MemberListRow = User & {
 };
 
 export default function Members() {
+    const { apiBase, network } = useNetwork();
     const [members, setMembers] = useState<MemberListRow[]>([]);
     const [page, setPage] = useState(1);
     const membersPerPage = 25;
@@ -22,7 +24,7 @@ export default function Members() {
     useEffect(() => {
         const fetchMembers = async () => {
             try {
-                const response = await fetch(`/api/members?page=${page}&sort=${sort}`);
+                const response = await fetch(`${apiBase}/members?page=${page}&sort=${sort}`);
                 const rows = await response.json() as MemberListRow[];
                 setMembers(rows);
                 console.log(`Query returned ${rows.length} rows.`);
@@ -41,7 +43,7 @@ export default function Members() {
             }
         };
         fetchMembers();
-    }, [page, sort]);
+    }, [page, sort, apiBase]);
 
     const handleSort = (eventKey: string | null) => {
         setSort((eventKey || 'Watched') as MemberSort);
@@ -55,7 +57,7 @@ export default function Members() {
     if (isLoading) {
         return (
             <div className="container">
-                <h3 className="my-3">Community Members</h3>
+                <h3 className="my-3">{network === 'lank' ? 'Lank Members' : 'Community Members'}</h3>
                 <div className="mb-3 sort-by text-end">
                     Sort by
                     <MemberSortDropdown sort={sort} handleSort={handleSort} />

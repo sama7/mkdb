@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import FilmCardNewDepartures from './FilmCardNewDepartures'; // A component to display each film's poster
 import Spinner from 'react-bootstrap/Spinner';
 import type { RankChangeFilm, TabPanelProps } from '../types';
+import { useNetwork } from '../network';
 
 const FilmGridNewDepartures = (props: TabPanelProps) => {
+    const { apiBase } = useNetwork();
     const [films, setFilms] = useState<RankChangeFilm[]>([]);
     const [columns, setColumns] = useState(5);
     const [isLoading, setLoading] = useState(true);
@@ -30,7 +32,7 @@ const FilmGridNewDepartures = (props: TabPanelProps) => {
 
     const fetchFilmNewDepartures = async () => {
         try {
-            const response = await fetch(`/api/new-departures`);
+            const response = await fetch(`${apiBase}/new-departures`);
             const rows = await response.json() as RankChangeFilm[];
             setFilms(rows);
             console.log(`Query returned ${rows.length} rows.`);

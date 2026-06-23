@@ -1,12 +1,14 @@
 import { Link } from 'react-router-dom';
 import CircleProgress from './CircleProgress';
 import type { NeighborSummary } from '../types';
+import { useNetwork } from '../network';
 
 interface MemberNeighborsRowsProps {
     neighbors: NeighborSummary[];
 }
 
 export default function MemberNeighborsRows(props: MemberNeighborsRowsProps) {
+    const { urlBase } = useNetwork();
 
     const neighbors = props.neighbors?.map((neighbor, index: number) => {
         return (
@@ -19,7 +21,7 @@ export default function MemberNeighborsRows(props: MemberNeighborsRowsProps) {
                             className="user-avatar"
                         />
                         <span className="username">
-                            <Link to={`/members/${neighbor.user_a}/${neighbor.neighbor_username}`}>
+                            <Link to={`${urlBase}/members/${neighbor.user_a}/${neighbor.neighbor_username}`}>
                                 {neighbor.neighbor_display_name}
                             </Link>
                         </span>

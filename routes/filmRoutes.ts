@@ -3,6 +3,10 @@ import * as filmController from '../controllers/filmController.js';
 
 const router = express.Router();
 
+// =============================================================================
+// Metro (default community) routes
+// =============================================================================
+
 // GET /api/rankings - Retrieve top film rankings with optional filters
 router.get('/rankings', filmController.getFilmRankings);
 
@@ -39,10 +43,26 @@ router.get('/neighbors-agreed/:username_a/:username_b', filmController.getNeighb
 // GET /api/neighbors-differ/:username_a/:username_b - Retrieve films whose rating the two neighbors differed on
 router.get('/neighbors-differ/:username_a/:username_b', filmController.getNeighborDifferFilms);
 
-// GET /api/evil-mank - Retrieve top film rankings with optional filters
+// GET /api/evil-mank - Bottom-ranked films (metro-only)
 router.get('/evil-mank', filmController.getEvilMankFilmRankings);
 
-// GET /api/lank - Top film rankings restricted to ratings from the LANK_USERS subset
-router.get('/lank', filmController.getLankFilmRankings);
+// =============================================================================
+// Lank (lycandb subset) routes — same shape as the metro routes above, but
+// the underlying queries filter to users.is_lycan and film_rankings_history /
+// user_similarity_scores rows with network='lank'.
+// =============================================================================
+
+router.get('/lank',                                       filmController.getLankFilmRankings);
+router.get('/lank/film/:slug',                            filmController.getLankFilmDetails);
+router.get('/lank/risers',                                filmController.getLankFilmRisersRankings);
+router.get('/lank/fallers',                               filmController.getLankFilmFallersRankings);
+router.get('/lank/new-entries',                           filmController.getLankFilmNewEntriesRankings);
+router.get('/lank/new-departures',                        filmController.getLankFilmNewDeparturesRankings);
+router.get('/lank/members',                               filmController.getLankMembers);
+router.get('/lank/members/:username',                     filmController.getLankMemberDetails);
+router.get('/lank/member/:username',                      filmController.getLankMemberNeighbors);
+router.get('/lank/neighbors/:username_a/:username_b',        filmController.getLankNeighborDetails);
+router.get('/lank/neighbors-agreed/:username_a/:username_b', filmController.getLankNeighborAgreedFilms);
+router.get('/lank/neighbors-differ/:username_a/:username_b', filmController.getLankNeighborDifferFilms);
 
 export default router;

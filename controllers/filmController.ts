@@ -3,16 +3,22 @@ import type { Request, Response } from 'express';
 import type { GenreFilters, RankingFilters } from '../types/api.js';
 
 const MAX_LIMIT = 500;
-type SqlParam = string | number | string[];
+type SqlParam = string | number | string[] | boolean;
 
-// LANK_USERS: comma-separated list of usernames defining the "lank" subset
-// used by /api/lank. Usernames not present in `users` (i.e. not followed by
-// metrodb) are filtered out naturally by the JOIN in the SQL below. Read
-// once at module-load; .env doesn't change at runtime.
-const LANK_USERS = (process.env.LANK_USERS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+// Network identifier — 'metro' is the default community (all metrodb follows);
+// 'lank' is the lycandb subset. Stored in users.is_metro/is_lycan and used as
+// a discriminator on film_rankings_history.network and user_similarity_scores.
+export type Network = 'metro' | 'lank';
+
+interface NetworkSpec {
+    userFlag: 'is_metro' | 'is_lycan';
+    defaultMinRatings: number;
+}
+
+const NETWORKS: Record<Network, NetworkSpec> = {
+    metro: { userFlag: 'is_metro', defaultMinRatings: 10 },
+    lank:  { userFlag: 'is_lycan', defaultMinRatings: 5 },
+};
 
 function clampLimit(raw: unknown, defaultValue: number): number {
     const n = Number(raw);
@@ -24,33 +30,29 @@ function parseRankingFilters(raw: unknown): RankingFilters {
     return JSON.parse((raw || '{}') as string) as RankingFilters;
 }
 
-function mergedRankingQuery(req: Request): RankingFilters {
-    return { ...parseRankingFilters(req.query.filters), ...req.query } as RankingFilters;
-}
-
 function genreEntries(genres: unknown): [string, string][] {
     return Object.entries((genres || {}) as Record<string, string>);
 }
 
-// Function to get top film rankings with optional filters
-export const getFilmRankings = async (req: Request, res: Response) => {
+// Top film rankings for a given network. The user JOIN filters the ratings
+// pool to that network's members; the rest is the same query for both.
+async function _getFilmRankings(req: Request, res: Response, network: Network) {
     try {
-        // Parse the filters from the query string
+        const spec = NETWORKS[network];
         const filters = parseRankingFilters(req.query.filters);
 
-        // Extract page and filters
         const {
             page = 1,
             minYear,
             maxYear,
-            minRatings = 10,  // Default value
+            minRatings = spec.defaultMinRatings,
             maxRatings,
             limit: rawLimit,
             genres = {}
         } = { ...filters, ...req.query } as RankingFilters;
 
         const limit = clampLimit(rawLimit, 100);
-        const offset = (Number(page) - 1) * limit;  // for pagination
+        const offset = (Number(page) - 1) * limit;
         const queryParams: SqlParam[] = [];
         let paramIndex = 1;
 
@@ -77,12 +79,13 @@ export const getFilmRankings = async (req: Request, res: Response) => {
                     films f
                 JOIN
                     ratings r ON f.film_id = r.film_id
+                JOIN
+                    users u ON r.user_id = u.user_id AND u.${spec.userFlag}
                 WHERE f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
         `;
 
-        const conditions = [];
+        const conditions: string[] = [];
 
-        // Add optional minYear and maxYear filters
         if (minYear) {
             conditions.push(`f.year >= $${paramIndex++}`);
             queryParams.push(minYear);
@@ -92,42 +95,29 @@ export const getFilmRankings = async (req: Request, res: Response) => {
             queryParams.push(maxYear);
         }
 
-        // Handle genres filter: include or exclude genres
         const includeGenres: string[] = [];
         const excludeGenres: string[] = [];
-
         genreEntries(genres).forEach(([genre, mode]) => {
-            if (mode === 'include') {
-                includeGenres.push(genre);
-            } else if (mode === 'exclude') {
-                excludeGenres.push(genre);
-            }
+            if (mode === 'include') includeGenres.push(genre);
+            else if (mode === 'exclude') excludeGenres.push(genre);
         });
 
-        // Add conditions for included genres - film must include *all* genres in the list
         if (includeGenres.length > 0) {
             conditions.push(`f.genres @> $${paramIndex++}::text[]`);
             queryParams.push(includeGenres);
         }
-
-        // Add conditions for excluded genres - exclude films that have any of the listed genres
         if (excludeGenres.length > 0) {
             conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
             queryParams.push(excludeGenres);
         }
 
-        // Append any additional conditions for year if they exist
-        if (conditions.length > 0) {
-            query += ` AND ${conditions.join(' AND ')} `;
-        }
+        if (conditions.length > 0) query += ` AND ${conditions.join(' AND ')} `;
 
         query += `
-                GROUP BY
-                    f.film_id, f.title, f.year, f.slug, f.genres
+                GROUP BY f.film_id, f.title, f.year, f.slug, f.genres
         `;
 
-        const havingConditions = [];
-
+        const havingConditions: string[] = [];
         if (minRatings) {
             havingConditions.push(`COUNT(r.rating) >= $${paramIndex++}`);
             queryParams.push(minRatings);
@@ -137,45 +127,43 @@ export const getFilmRankings = async (req: Request, res: Response) => {
             queryParams.push(maxRatings);
         }
 
-        if (havingConditions.length > 0) {
-            query += ` HAVING ${havingConditions.join(' AND ')} `;
-        }
+        if (havingConditions.length > 0) query += ` HAVING ${havingConditions.join(' AND ')} `;
 
         query += `
-            ) subquery    
+            ) subquery
             ORDER BY average_rating DESC, rating_count DESC
             LIMIT $${paramIndex++} OFFSET $${paramIndex++};
         `;
-
         queryParams.push(limit, offset);
 
         const { rows } = await pool.query(query, queryParams);
         res.json(rows);
     } catch (error) {
-        console.error('Error fetching top film rankings:', error);
+        console.error(`Error fetching ${network} film rankings:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get bottom film rankings with optional filters
+export const getFilmRankings     = (req: Request, res: Response) => _getFilmRankings(req, res, 'metro');
+export const getLankFilmRankings = (req: Request, res: Response) => _getFilmRankings(req, res, 'lank');
+
+// Bottom-ranked films (metro-only — no lank counterpart).
 export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
     try {
-        // Parse the filters from the query string
         const filters = parseRankingFilters(req.query.filters);
 
-        // Extract page and filters
         const {
             page = 1,
             minYear,
             maxYear,
-            minRatings = 10,  // Default value
+            minRatings = 10,
             maxRatings,
             limit: rawLimit,
             genres = {}
         } = { ...filters, ...req.query } as RankingFilters;
 
         const limit = clampLimit(rawLimit, 100);
-        const offset = (Number(page) - 1) * limit;  // for pagination
+        const offset = (Number(page) - 1) * limit;
         const queryParams: SqlParam[] = [];
         let paramIndex = 1;
 
@@ -183,95 +171,51 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
             SELECT
                 total_count,
                 ROW_NUMBER() OVER (ORDER BY (average_rating) ASC, (rating_count) DESC) AS ranking,
-                title,
-                year,
-                slug,
-                genres,
-                average_rating,
-                rating_count
+                title, year, slug, genres, average_rating, rating_count
             FROM (
                 SELECT
-                    f.title,
-                    f.year,
-                    f.slug,
-                    f.genres,
+                    f.title, f.year, f.slug, f.genres,
                     AVG(r.rating) AS average_rating,
                     COUNT(r.rating) AS rating_count,
                     COUNT(*) OVER() AS total_count
-                FROM
-                    films f
-                JOIN
-                    ratings r ON f.film_id = r.film_id
+                FROM films f
+                JOIN ratings r ON f.film_id = r.film_id
+                JOIN users   u ON r.user_id = u.user_id AND u.is_metro
                 WHERE f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
         `;
 
-        const conditions = [];
+        const conditions: string[] = [];
+        if (minYear) { conditions.push(`f.year >= $${paramIndex++}`); queryParams.push(minYear); }
+        if (maxYear) { conditions.push(`f.year <= $${paramIndex++}`); queryParams.push(maxYear); }
 
-        // Add optional minYear and maxYear filters
-        if (minYear) {
-            conditions.push(`f.year >= $${paramIndex++}`);
-            queryParams.push(minYear);
-        }
-        if (maxYear) {
-            conditions.push(`f.year <= $${paramIndex++}`);
-            queryParams.push(maxYear);
-        }
-
-        // Handle genres filter: include or exclude genres
         const includeGenres: string[] = [];
         const excludeGenres: string[] = [];
-
         genreEntries(genres).forEach(([genre, mode]) => {
-            if (mode === 'include') {
-                includeGenres.push(genre);
-            } else if (mode === 'exclude') {
-                excludeGenres.push(genre);
-            }
+            if (mode === 'include') includeGenres.push(genre);
+            else if (mode === 'exclude') excludeGenres.push(genre);
         });
-
-        // Add conditions for included genres - film must include *all* genres in the list
         if (includeGenres.length > 0) {
             conditions.push(`f.genres @> $${paramIndex++}::text[]`);
             queryParams.push(includeGenres);
         }
-
-        // Add conditions for excluded genres - exclude films that have any of the listed genres
         if (excludeGenres.length > 0) {
             conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
             queryParams.push(excludeGenres);
         }
+        if (conditions.length > 0) query += ` AND ${conditions.join(' AND ')} `;
 
-        // Append any additional conditions for year if they exist
-        if (conditions.length > 0) {
-            query += ` AND ${conditions.join(' AND ')} `;
-        }
+        query += ` GROUP BY f.film_id, f.title, f.year, f.slug, f.genres `;
 
-        query += `
-                GROUP BY
-                    f.film_id, f.title, f.year, f.slug, f.genres
-        `;
-
-        const havingConditions = [];
-
-        if (minRatings) {
-            havingConditions.push(`COUNT(r.rating) >= $${paramIndex++}`);
-            queryParams.push(minRatings);
-        }
-        if (maxRatings) {
-            havingConditions.push(`COUNT(r.rating) <= $${paramIndex++}`);
-            queryParams.push(maxRatings);
-        }
-
-        if (havingConditions.length > 0) {
-            query += ` HAVING ${havingConditions.join(' AND ')} `;
-        }
+        const havingConditions: string[] = [];
+        if (minRatings) { havingConditions.push(`COUNT(r.rating) >= $${paramIndex++}`); queryParams.push(minRatings); }
+        if (maxRatings) { havingConditions.push(`COUNT(r.rating) <= $${paramIndex++}`); queryParams.push(maxRatings); }
+        if (havingConditions.length > 0) query += ` HAVING ${havingConditions.join(' AND ')} `;
 
         query += `
-            ) subquery    
+            ) subquery
             ORDER BY average_rating ASC, rating_count DESC
             LIMIT $${paramIndex++} OFFSET $${paramIndex++};
         `;
-
         queryParams.push(limit, offset);
 
         const { rows } = await pool.query(query, queryParams);
@@ -282,346 +226,208 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
     }
 };
 
-// Top film rankings restricted to ratings from the LANK_USERS subset of
-// metrodb followers. Mirrors getFilmRankings but joins the ratings against
-// `users` and filters by username. minRatings default is 5 (instead of 10)
-// because the lank pool is far smaller than the full community, so a higher
-// floor would empty out the top-1000 page.
-export const getLankFilmRankings = async (req: Request, res: Response) => {
-    try {
-        const filters = parseRankingFilters(req.query.filters);
-
-        const {
-            page = 1,
-            minYear,
-            maxYear,
-            minRatings = 5,
-            maxRatings,
-            limit: rawLimit,
-            genres = {}
-        } = { ...filters, ...req.query } as RankingFilters;
-
-        const limit = clampLimit(rawLimit, 100);
-        const offset = (Number(page) - 1) * limit;
-        const queryParams: SqlParam[] = [LANK_USERS];   // $1
-        let paramIndex = 2;
-
-        let query = `
-            SELECT
-                total_count,
-                ROW_NUMBER() OVER (ORDER BY (average_rating) DESC, (rating_count) DESC) AS ranking,
-                title,
-                year,
-                slug,
-                genres,
-                average_rating,
-                rating_count
-            FROM (
-                SELECT
-                    f.title,
-                    f.year,
-                    f.slug,
-                    f.genres,
-                    AVG(r.rating) AS average_rating,
-                    COUNT(r.rating) AS rating_count,
-                    COUNT(*) OVER() AS total_count
-                FROM
-                    films f
-                JOIN
-                    ratings r ON f.film_id = r.film_id
-                JOIN
-                    users u ON r.user_id = u.user_id
-                WHERE f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
-                  AND u.username = ANY($1::text[])
-        `;
-
-        const conditions = [];
-
-        if (minYear) {
-            conditions.push(`f.year >= $${paramIndex++}`);
-            queryParams.push(minYear);
-        }
-        if (maxYear) {
-            conditions.push(`f.year <= $${paramIndex++}`);
-            queryParams.push(maxYear);
-        }
-
-        const includeGenres: string[] = [];
-        const excludeGenres: string[] = [];
-
-        genreEntries(genres).forEach(([genre, mode]) => {
-            if (mode === 'include') {
-                includeGenres.push(genre);
-            } else if (mode === 'exclude') {
-                excludeGenres.push(genre);
-            }
-        });
-
-        if (includeGenres.length > 0) {
-            conditions.push(`f.genres @> $${paramIndex++}::text[]`);
-            queryParams.push(includeGenres);
-        }
-
-        if (excludeGenres.length > 0) {
-            conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
-            queryParams.push(excludeGenres);
-        }
-
-        if (conditions.length > 0) {
-            query += ` AND ${conditions.join(' AND ')} `;
-        }
-
-        query += `
-                GROUP BY
-                    f.film_id, f.title, f.year, f.slug, f.genres
-        `;
-
-        const havingConditions = [];
-
-        if (minRatings) {
-            havingConditions.push(`COUNT(r.rating) >= $${paramIndex++}`);
-            queryParams.push(minRatings);
-        }
-        if (maxRatings) {
-            havingConditions.push(`COUNT(r.rating) <= $${paramIndex++}`);
-            queryParams.push(maxRatings);
-        }
-
-        if (havingConditions.length > 0) {
-            query += ` HAVING ${havingConditions.join(' AND ')} `;
-        }
-
-        query += `
-            ) subquery
-            ORDER BY average_rating DESC, rating_count DESC
-            LIMIT $${paramIndex++} OFFSET $${paramIndex++};
-        `;
-
-        queryParams.push(limit, offset);
-
-        const { rows } = await pool.query(query, queryParams);
-        res.json(rows);
-    } catch (error) {
-        console.error('Error fetching lank film rankings:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-};
-
-// Function to get greatest risers' rankings
-export const getFilmRisersRankings = async (_req: Request, res: Response) => {
+// Risers / fallers / new-entries / new-departures all read from
+// film_rankings_history. Network discriminator is passed as $1.
+async function _getFilmRisersRankings(_req: Request, res: Response, network: Network) {
     try {
         const query = `
             SELECT
-                frh.title,
-                frh.year,
-                frh.slug,
-                frh.current_rank,
-                frh.previous_rank,
+                frh.title, frh.year, frh.slug,
+                frh.current_rank, frh.previous_rank,
                 (frh.previous_rank - frh.current_rank) AS rank_change
             FROM (
                 SELECT
-                    f.film_id,
-                    f.title,
-                    f.year,
-                    f.slug,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                    f.film_id, f.title, f.year, f.slug,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) FROM film_rankings_history WHERE network = $1)
+                    ) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history WHERE network = $1)
+                    ) AS previous_rank
                 FROM films f
             ) AS frh
             WHERE frh.previous_rank IS NOT NULL
-                AND frh.current_rank IS NOT NULL
-                AND frh.previous_rank > frh.current_rank
+              AND frh.current_rank IS NOT NULL
+              AND frh.previous_rank > frh.current_rank
             ORDER BY rank_change DESC
             LIMIT 100
         `;
-
-        const { rows } = await pool.query(query);
+        const { rows } = await pool.query(query, [network]);
         res.json(rows);
     } catch (error) {
-        console.error("Error fetching film risers' rankings:", error);
+        console.error(`Error fetching ${network} risers' rankings:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get greatest fallers' rankings
-export const getFilmFallersRankings = async (_req: Request, res: Response) => {
+export const getFilmRisersRankings     = (req: Request, res: Response) => _getFilmRisersRankings(req, res, 'metro');
+export const getLankFilmRisersRankings = (req: Request, res: Response) => _getFilmRisersRankings(req, res, 'lank');
+
+async function _getFilmFallersRankings(_req: Request, res: Response, network: Network) {
     try {
         const query = `
             SELECT
-                frh.title,
-                frh.year,
-                frh.slug,
-                frh.current_rank,
-                frh.previous_rank,
+                frh.title, frh.year, frh.slug,
+                frh.current_rank, frh.previous_rank,
                 (frh.previous_rank - frh.current_rank) AS rank_change
             FROM (
                 SELECT
-                    f.film_id,
-                    f.title,
-                    f.year,
-                    f.slug,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                    f.film_id, f.title, f.year, f.slug,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) FROM film_rankings_history WHERE network = $1)
+                    ) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history WHERE network = $1)
+                    ) AS previous_rank
                 FROM films f
             ) AS frh
             WHERE frh.previous_rank IS NOT NULL
-                AND frh.current_rank IS NOT NULL
-                AND frh.previous_rank < frh.current_rank
+              AND frh.current_rank IS NOT NULL
+              AND frh.previous_rank < frh.current_rank
             ORDER BY rank_change ASC
-            LIMIT 100;  -- Adjust limit as needed
+            LIMIT 100
         `;
-
-        const { rows } = await pool.query(query);
+        const { rows } = await pool.query(query, [network]);
         res.json(rows);
     } catch (error) {
-        console.error("Error fetching film fallers' rankings:", error);
+        console.error(`Error fetching ${network} fallers' rankings:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get new entries' rankings
-export const getFilmNewEntriesRankings = async (_req: Request, res: Response) => {
+export const getFilmFallersRankings     = (req: Request, res: Response) => _getFilmFallersRankings(req, res, 'metro');
+export const getLankFilmFallersRankings = (req: Request, res: Response) => _getFilmFallersRankings(req, res, 'lank');
+
+async function _getFilmNewEntriesRankings(_req: Request, res: Response, network: Network) {
     try {
         const query = `
-            SELECT
-                frh.title,
-                frh.year,
-                frh.slug,
-                frh.current_rank
+            SELECT frh.title, frh.year, frh.slug, frh.current_rank
             FROM (
                 SELECT
-                    f.film_id,
-                    f.title,
-                    f.year,
-                    f.slug,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                    f.film_id, f.title, f.year, f.slug,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) FROM film_rankings_history WHERE network = $1)
+                    ) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history WHERE network = $1)
+                    ) AS previous_rank
                 FROM films f
             ) AS frh
             WHERE frh.previous_rank IS NULL
-                AND frh.current_rank IS NOT NULL
+              AND frh.current_rank IS NOT NULL
             ORDER BY frh.current_rank ASC
-            LIMIT 100;  -- Adjust limit as needed
+            LIMIT 100
         `;
-
-        const { rows } = await pool.query(query);
+        const { rows } = await pool.query(query, [network]);
         res.json(rows);
     } catch (error) {
-        console.error("Error fetching film new entries' rankings:", error);
+        console.error(`Error fetching ${network} new-entries' rankings:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get new departures' rankings
-export const getFilmNewDeparturesRankings = async (_req: Request, res: Response) => {
+export const getFilmNewEntriesRankings     = (req: Request, res: Response) => _getFilmNewEntriesRankings(req, res, 'metro');
+export const getLankFilmNewEntriesRankings = (req: Request, res: Response) => _getFilmNewEntriesRankings(req, res, 'lank');
+
+async function _getFilmNewDeparturesRankings(_req: Request, res: Response, network: Network) {
     try {
         const query = `
-            SELECT
-                frh.title,
-                frh.year,
-                frh.slug,
-                frh.previous_rank
+            SELECT frh.title, frh.year, frh.slug, frh.previous_rank
             FROM (
                 SELECT
-                    f.film_id,
-                    f.title,
-                    f.year,
-                    f.slug,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) FROM film_rankings_history)) AS current_rank,
-                    (SELECT ranking FROM film_rankings_history frh WHERE f.film_id = frh.film_id AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)) AS previous_rank
+                    f.film_id, f.title, f.year, f.slug,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) FROM film_rankings_history WHERE network = $1)
+                    ) AS current_rank,
+                    (SELECT ranking FROM film_rankings_history frh
+                       WHERE f.film_id = frh.film_id AND frh.network = $1
+                         AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history WHERE network = $1)
+                    ) AS previous_rank
                 FROM films f
             ) AS frh
             WHERE frh.previous_rank IS NOT NULL
-                AND frh.current_rank IS NULL
+              AND frh.current_rank IS NULL
             ORDER BY frh.previous_rank ASC
-            LIMIT 100;  -- Adjust limit as needed
+            LIMIT 100
         `;
-
-        const { rows } = await pool.query(query);
+        const { rows } = await pool.query(query, [network]);
         res.json(rows);
     } catch (error) {
-        console.error("Error fetching film new departures' rankings:", error);
+        console.error(`Error fetching ${network} new-departures' rankings:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Get film details and ratings
-export const getFilmDetails = async (req: Request<{ slug: string }>, res: Response) => {
+export const getFilmNewDeparturesRankings     = (req: Request, res: Response) => _getFilmNewDeparturesRankings(req, res, 'metro');
+export const getLankFilmNewDeparturesRankings = (req: Request, res: Response) => _getFilmNewDeparturesRankings(req, res, 'lank');
+
+// Film details — same shape both networks. Ratings + average + current_rank
+// filter to the network's members & history rows.
+async function _getFilmDetails(req: Request<{ slug: string }>, res: Response, network: Network) {
     const { slug } = req.params;
-
+    const spec = NETWORKS[network];
     try {
-        // Fetch film details
         const filmQuery = `
             SELECT
-                f.title,
-                f.year,
-                f.directors,
-                f.genres,
-                f.countries,
-                f.languages,
-                f.runtime,
-                f.synopsis,
+                f.title, f.year, f.directors, f.genres, f.countries, f.languages,
+                f.runtime, f.synopsis,
                 AVG(r.rating) AS average_rating,
                 COUNT(r.rating) AS rating_count,
                 (
-                    SELECT ranking
-                    FROM film_rankings_history frh
-                    WHERE 
-                        f.film_id = frh.film_id
-                        AND
-                        frh.week = (SELECT MAX(week) FROM film_rankings_history)
+                    SELECT ranking FROM film_rankings_history frh
+                    WHERE f.film_id = frh.film_id AND frh.network = $2
+                      AND frh.week = (SELECT MAX(week) FROM film_rankings_history WHERE network = $2)
                 ) AS current_rank,
                 (
-                    SELECT ranking
-                    FROM film_rankings_history frh
-                    WHERE 
-                        f.film_id = frh.film_id
-                        AND
-                        frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history)
+                    SELECT ranking FROM film_rankings_history frh
+                    WHERE f.film_id = frh.film_id AND frh.network = $2
+                      AND frh.week = (SELECT MAX(week) - 1 FROM film_rankings_history WHERE network = $2)
                 ) AS previous_rank
-            FROM
-                films f
-            JOIN
-                ratings r ON f.film_id = r.film_id
+            FROM films f
+            JOIN ratings r ON f.film_id = r.film_id
+            JOIN users   u ON r.user_id = u.user_id AND u.${spec.userFlag}
             WHERE f.slug = $1
-            GROUP BY
-                f.film_id, f.title, f.year, f.slug, f.synopsis 
+            GROUP BY f.film_id, f.title, f.year, f.slug, f.synopsis
         `;
-        const filmResult = await pool.query(filmQuery, [slug]);
+        const filmResult = await pool.query(filmQuery, [slug, network]);
         const film = filmResult.rows[0];
 
         if (!film) {
             return res.status(404).json({ error: 'Film not found' });
         }
 
-        // Fetch user ratings
         const ratingsQuery = `
             SELECT u.username, u.display_name, r.rating
             FROM ratings r
-            JOIN users u ON r.user_id = u.user_id
+            JOIN users u ON r.user_id = u.user_id AND u.${spec.userFlag}
             JOIN films f ON r.film_id = f.film_id
             WHERE f.slug = $1
             ORDER BY r.rating DESC
         `;
         const ratingsResult = await pool.query(ratingsQuery, [slug]);
 
-        res.json({
-            film,
-            ratings: ratingsResult.rows,
-        });
+        res.json({ film, ratings: ratingsResult.rows });
     } catch (error) {
-        if (Number(error.code) === 404) {
-            throw error;          // bubble up to caller
-        }
-        console.error('Error fetching film details:', error);
+        if (Number(error.code) === 404) throw error;
+        console.error(`Error fetching ${network} film details:`, error);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get all community members with pagination
-export const getMembers = async (req: Request, res: Response) => {
+export const getFilmDetails     = (req: Request<{ slug: string }>, res: Response) => _getFilmDetails(req, res, 'metro');
+export const getLankFilmDetails = (req: Request<{ slug: string }>, res: Response) => _getFilmDetails(req, res, 'lank');
+
+// Members list. Filters users by network membership.
+async function _getMembers(req: Request, res: Response, network: Network) {
     try {
-        // Extract page
+        const spec = NETWORKS[network];
         const {
             page = 1,
             limit: rawLimit,
@@ -629,89 +435,63 @@ export const getMembers = async (req: Request, res: Response) => {
         } = { ...req.query };
 
         const limit = clampLimit(rawLimit, 25);
-        const offset = (Number(page) - 1) * limit;  // for pagination
+        const offset = (Number(page) - 1) * limit;
 
-        let query = `
+        const orderBy = sort === 'Name' ? 'UPPER(display_name) ASC' : 'num_films_watched DESC';
+        const query = `
             SELECT
                 COUNT(*) OVER() AS total_count,
-                user_id,
-                username,
-                display_name,
-                num_films_watched
-            FROM
-                users
-            ORDER BY num_films_watched DESC
+                user_id, username, display_name, num_films_watched
+            FROM users
+            WHERE ${spec.userFlag}
+            ORDER BY ${orderBy}
             LIMIT $1 OFFSET $2
         `;
-
-        // if sort is 'Watched', just use the above query
-        // if sort is 'Name', reassign query to use the below
-        // this is because you can't parameterize the ORDER BY value
-        if (sort === 'Name') {
-            query = `
-                SELECT
-                    COUNT(*) OVER() AS total_count,
-                    user_id,
-                    username,
-                    display_name,
-                    num_films_watched
-                FROM
-                    users
-                ORDER BY UPPER(display_name) ASC
-                LIMIT $1 OFFSET $2
-            `;
-        }
-
         const { rows } = await pool.query(query, [limit, offset]);
         res.json(rows);
     } catch (error) {
-        console.error('Error fetching members:', error);
+        console.error(`Error fetching ${network} members:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get a specific community member's details
-export const getMemberDetails = async (req: Request<{ username: string }>, res: Response) => {
+export const getMembers     = (req: Request, res: Response) => _getMembers(req, res, 'metro');
+export const getLankMembers = (req: Request, res: Response) => _getLankMembersImpl(req, res);
+async function _getLankMembersImpl(req: Request, res: Response) { return _getMembers(req, res, 'lank'); }
+
+// Single member's details. The member's avg_rating is their own — same value
+// regardless of network — but we still gate the lookup by network membership
+// so /lank/members/:not-a-lycan returns 404.
+async function _getMemberDetails(req: Request<{ username: string }>, res: Response, network: Network) {
     try {
+        const spec = NETWORKS[network];
         const { username } = req.params;
-
-        let query = `
+        const query = `
             SELECT
-                u.user_id,
-                u.username,
-                u.display_name,
-                u.num_films_watched,
+                u.user_id, u.username, u.display_name, u.num_films_watched,
                 AVG(r.rating) AS avg_rating
-            FROM
-                users u
-            LEFT JOIN
-                ratings r ON r.user_id = u.user_id
-            WHERE
-                u.user_id = (SELECT user_id FROM users WHERE username = $1)
-            GROUP BY
-                u.user_id
+            FROM users u
+            LEFT JOIN ratings r ON r.user_id = u.user_id
+            WHERE u.username = $1 AND u.${spec.userFlag}
+            GROUP BY u.user_id
         `;
-
         const memberResult = await pool.query(query, [username]);
         const member = memberResult.rows[0];
-
-        if (!member) {
-            return res.status(404).json({ error: 'Member not found' });
-        }
-
+        if (!member) return res.status(404).json({ error: 'Member not found' });
         res.json(member);
     } catch (error) {
-        console.error('Error fetching member details:', error);
+        console.error(`Error fetching ${network} member details:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get all community neighbors of a given member with pagination
-export const getMemberNeighbors = async (req: Request<{ username: string }>, res: Response) => {
+export const getMemberDetails     = (req: Request<{ username: string }>, res: Response) => _getMemberDetails(req, res, 'metro');
+export const getLankMemberDetails = (req: Request<{ username: string }>, res: Response) => _getMemberDetails(req, res, 'lank');
+
+// Neighbors — uses user_similarity_scores filtered to the network.
+async function _getMemberNeighbors(req: Request<{ username: string }>, res: Response, network: Network) {
     try {
         const { username } = req.params;
-
-        // Extract page
         const {
             page = 1,
             limit: rawLimit,
@@ -719,9 +499,9 @@ export const getMemberNeighbors = async (req: Request<{ username: string }>, res
         } = { ...req.query };
 
         const limit = clampLimit(rawLimit, 25);
-        const offset = (Number(page) - 1) * limit;  // for pagination
-
-        let query = `
+        const offset = (Number(page) - 1) * limit;
+        const orderBy = sort === 'Name' ? 'UPPER(ub.display_name) ASC' : 'usc.similarity_score DESC';
+        const query = `
             SELECT
                 COUNT(*) OVER() AS total_count,
                 ua.username AS user_a,
@@ -730,59 +510,27 @@ export const getMemberNeighbors = async (req: Request<{ username: string }>, res
                 usc.similarity_score AS similarity_score,
                 usc.overlap_count,
                 usc.avg_rating_distance
-            FROM
-                user_similarity_scores usc
-            JOIN
-                users ua ON usc.user_a = ua.user_id
-            JOIN
-                users ub ON usc.user_b = ub.user_id
-            WHERE
-                ua.username = $1
-            ORDER BY
-                usc.similarity_score DESC
-            LIMIT $2 OFFSET $3
+            FROM user_similarity_scores usc
+            JOIN users ua ON usc.user_a = ua.user_id
+            JOIN users ub ON usc.user_b = ub.user_id
+            WHERE ua.username = $1 AND usc.network = $2
+            ORDER BY ${orderBy}
+            LIMIT $3 OFFSET $4
         `;
-
-        // if sort is 'Similarity Score', just use the above query
-        // if sort is 'Name', reassign query to use the below
-        // this is because you can't parameterize the ORDER BY value
-        if (sort === 'Name') {
-            query = `
-                SELECT
-                    COUNT(*) OVER() AS total_count,
-                    ua.username AS user_a,
-                    ub.username AS neighbor_username,
-                    ub.display_name AS neighbor_display_name,
-                    usc.similarity_score AS similarity_score,
-                    usc.overlap_count,
-                    usc.avg_rating_distance
-                FROM
-                    user_similarity_scores usc
-                JOIN
-                    users ua ON usc.user_a = ua.user_id
-                JOIN
-                    users ub ON usc.user_b = ub.user_id
-                WHERE
-                    ua.username = $1
-                ORDER BY
-                    UPPER(ub.display_name) ASC
-                LIMIT $2 OFFSET $3
-            `;
-        }
-
-        const { rows } = await pool.query(query, [username, limit, offset]);
+        const { rows } = await pool.query(query, [username, network, limit, offset]);
         res.json(rows);
     } catch (error) {
-        console.error('Error fetching members:', error);
+        console.error(`Error fetching ${network} member neighbors:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get neighbor details between two members
-export const getNeighborDetails = async (req: Request<{ username_a: string; username_b: string }>, res: Response) => {
+export const getMemberNeighbors     = (req: Request<{ username: string }>, res: Response) => _getMemberNeighbors(req, res, 'metro');
+export const getLankMemberNeighbors = (req: Request<{ username: string }>, res: Response) => _getMemberNeighbors(req, res, 'lank');
+
+async function _getNeighborDetails(req: Request<{ username_a: string; username_b: string }>, res: Response, network: Network) {
     try {
         const { username_a, username_b } = req.params;
-
         const query = `
             SELECT
                 ua.username AS user_a,
@@ -791,124 +539,94 @@ export const getNeighborDetails = async (req: Request<{ username_a: string; user
                 usc.similarity_score AS similarity_score,
                 usc.overlap_count,
                 usc.avg_rating_distance
-            FROM
-                user_similarity_scores usc
-            JOIN
-                users ua ON usc.user_a = ua.user_id
-            JOIN
-                users ub ON usc.user_b = ub.user_id
-            WHERE
-                ua.username = $1
-                AND ub.username = $2
+            FROM user_similarity_scores usc
+            JOIN users ua ON usc.user_a = ua.user_id
+            JOIN users ub ON usc.user_b = ub.user_id
+            WHERE ua.username = $1 AND ub.username = $2 AND usc.network = $3
         `;
-
-        const result = await pool.query(query, [username_a, username_b]);
-        const neighborDetails = result.rows[0];
-        res.json(neighborDetails);
+        const result = await pool.query(query, [username_a, username_b, network]);
+        res.json(result.rows[0]);
     } catch (error) {
-        console.error('Error fetching neighbor details:', error);
+        console.error(`Error fetching ${network} neighbor details:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get the films upon which the two neighbors agreed on the rating - with pagination
-export const getNeighborAgreedFilms = async (req: Request<{ username_a: string; username_b: string }>, res: Response) => {
+export const getNeighborDetails     = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborDetails(req, res, 'metro');
+export const getLankNeighborDetails = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborDetails(req, res, 'lank');
+
+// Agreed / Differ films: these are between two specific users — the ratings
+// shown are their actual ratings, so no network filter needed at the rating
+// level. But for /lank context we still want to 404 if either user isn't in
+// the lycan pool, so we add a sanity check on user network membership.
+async function _getNeighborAgreedFilms(req: Request<{ username_a: string; username_b: string }>, res: Response, network: Network) {
     try {
+        const spec = NETWORKS[network];
         const { username_a, username_b } = req.params;
-
-        // Extract page
-        const {
-            page = 1,
-            limit: rawLimit,
-        } = { ...req.query };
-
+        const { page = 1, limit: rawLimit } = { ...req.query };
         const limit = clampLimit(rawLimit, 20);
-        const offset = (Number(page) - 1) * limit;  // for pagination of films whose rating they agreed on
+        const offset = (Number(page) - 1) * limit;
 
         const query = `
             SELECT
                 COUNT(*) OVER() AS total_count,
-                f.slug,
-                f.title,
-                f.year,
+                f.slug, f.title, f.year,
                 ua.username AS user_a_username,
                 ra.rating AS user_a_rating,
                 ub.username AS user_b_username,
                 rb.rating AS user_b_rating
-            FROM
-                ratings ra
-            JOIN
-                films f ON ra.film_id = f.film_id
-            JOIN
-                ratings rb ON ra.film_id = rb.film_id AND ra.user_id != rb.user_id
-            JOIN
-                users ua ON ra.user_id = ua.user_id
-            JOIN
-                users ub ON rb.user_id = ub.user_id
-            WHERE
-                ua.username = $1
-                AND ub.username = $2
-                AND ra.rating = rb.rating
-            ORDER BY
-                f.year, f.title
+            FROM ratings ra
+            JOIN films   f  ON ra.film_id = f.film_id
+            JOIN ratings rb ON ra.film_id = rb.film_id AND ra.user_id != rb.user_id
+            JOIN users   ua ON ra.user_id = ua.user_id AND ua.${spec.userFlag}
+            JOIN users   ub ON rb.user_id = ub.user_id AND ub.${spec.userFlag}
+            WHERE ua.username = $1 AND ub.username = $2 AND ra.rating = rb.rating
+            ORDER BY f.year, f.title
             LIMIT $3 OFFSET $4
         `;
-
         const { rows } = await pool.query(query, [username_a, username_b, limit, offset]);
         res.json(rows);
     } catch (error) {
-        console.error('Error fetching neighbor agreed films:', error);
+        console.error(`Error fetching ${network} neighbor agreed films:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
-// Function to get the films upon which the two neighbors differed on the rating - with pagination
-export const getNeighborDifferFilms = async (req: Request<{ username_a: string; username_b: string }>, res: Response) => {
+export const getNeighborAgreedFilms     = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborAgreedFilms(req, res, 'metro');
+export const getLankNeighborAgreedFilms = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborAgreedFilms(req, res, 'lank');
+
+async function _getNeighborDifferFilms(req: Request<{ username_a: string; username_b: string }>, res: Response, network: Network) {
     try {
+        const spec = NETWORKS[network];
         const { username_a, username_b } = req.params;
-
-        // Extract page
-        const {
-            page = 1,
-            limit: rawLimit,
-        } = { ...req.query };
-
+        const { page = 1, limit: rawLimit } = { ...req.query };
         const limit = clampLimit(rawLimit, 20);
-        const offset = (Number(page) - 1) * limit;  // for pagination of films whose rating they differed on
+        const offset = (Number(page) - 1) * limit;
 
         const query = `
             SELECT
                 COUNT(*) OVER() AS total_count,
-                f.slug,
-                f.title,
-                f.year,
+                f.slug, f.title, f.year,
                 ua.username AS user_a_username,
                 ra.rating AS user_a_rating,
                 ub.username AS user_b_username,
                 rb.rating AS user_b_rating
-            FROM
-                ratings ra
-            JOIN
-                films f ON ra.film_id = f.film_id
-            JOIN
-                ratings rb ON ra.film_id = rb.film_id AND ra.user_id != rb.user_id
-            JOIN
-                users ua ON ra.user_id = ua.user_id
-            JOIN
-                users ub ON rb.user_id = ub.user_id
-            WHERE
-                ua.username = $1
-                AND ub.username = $2
-                AND ra.rating != rb.rating
-            ORDER BY
-                ABS(ra.rating - rb.rating) ASC, f.year, f.title
+            FROM ratings ra
+            JOIN films   f  ON ra.film_id = f.film_id
+            JOIN ratings rb ON ra.film_id = rb.film_id AND ra.user_id != rb.user_id
+            JOIN users   ua ON ra.user_id = ua.user_id AND ua.${spec.userFlag}
+            JOIN users   ub ON rb.user_id = ub.user_id AND ub.${spec.userFlag}
+            WHERE ua.username = $1 AND ub.username = $2 AND ra.rating != rb.rating
+            ORDER BY ABS(ra.rating - rb.rating) ASC, f.year, f.title
             LIMIT $3 OFFSET $4
         `;
-
         const { rows } = await pool.query(query, [username_a, username_b, limit, offset]);
         res.json(rows);
     } catch (error) {
-        console.error('Error fetching neighbor differ films:', error);
+        console.error(`Error fetching ${network} neighbor differ films:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
+
+export const getNeighborDifferFilms     = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborDifferFilms(req, res, 'metro');
+export const getLankNeighborDifferFilms = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborDifferFilms(req, res, 'lank');

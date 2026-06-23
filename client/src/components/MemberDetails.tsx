@@ -5,8 +5,10 @@ import Spinner from 'react-bootstrap/Spinner';
 import MemberNeighborsTable from './MemberNeighborsTable';
 import MemberSortNeighborsDropdown from './MemberSortNeighborsDropdown';
 import type { Member, NeighborSort, NeighborSummary } from '../types';
+import { useNetwork } from '../network';
 
 export default function MemberDetails() {
+    const { apiBase, network } = useNetwork();
     const { username } = useParams();
     const [member, setMember] = useState<Member | null>(null);
     const [isNotFound, setNotFound] = useState(false);
@@ -23,7 +25,7 @@ export default function MemberDetails() {
         setMemberLoading(true);
         const fetchMemberDetails = async () => {
             try {
-                const response = await fetch(`/api/members/${username}`);
+                const response = await fetch(`${apiBase}/members/${username}`);
                 if (response.ok) {
                     const data = await response.json() as Member | null;
                     if (data) {
@@ -42,7 +44,7 @@ export default function MemberDetails() {
             }
         };
         fetchMemberDetails();
-    }, [username]);
+    }, [username, apiBase]);
 
     // When username changes, reset pagination + sort to defaults so the new
     // member always opens at page 1, sorted by similarity. This runs alongside
@@ -60,7 +62,7 @@ export default function MemberDetails() {
     useEffect(() => {
         const fetchMemberNeighbors = async () => {
             try {
-                const response = await fetch(`/api/member/${username}?page=${page}&sort=${sort}`);
+                const response = await fetch(`${apiBase}/member/${username}?page=${page}&sort=${sort}`);
                 const rows = await response.json() as NeighborSummary[];
                 setMemberNeighbors(rows);
                 console.log(`Query returned ${rows.length} rows.`);
@@ -78,7 +80,7 @@ export default function MemberDetails() {
             }
         };
         fetchMemberNeighbors();
-    }, [username, page, sort]);
+    }, [username, page, sort, apiBase]);
 
     const handleSort = (eventKey: string | null) => {
         setNeighborsLoading(true);
@@ -97,7 +99,7 @@ export default function MemberDetails() {
                 <Spinner data-bs-theme="dark" animation="border" role="status" className="mt-3">
                     <span className="visually-hidden">Loading...</span>
                 </Spinner>
-                <h3 className="mt-5 mb-3">Community Neighbors</h3>
+                <h3 className="mt-5 mb-3">{network === 'lank' ? 'Lank Neighbors' : 'Community Neighbors'}</h3>
                 <div className="mb-3 sort-by text-end">
                     Sort by
                     <MemberSortNeighborsDropdown sort={sort} handleSort={handleSort} />
@@ -141,7 +143,7 @@ export default function MemberDetails() {
                         </div>
                     </div>
                 </div>
-                <h3 className="mt-5 mb-3">Community Neighbors</h3>
+                <h3 className="mt-5 mb-3">{network === 'lank' ? 'Lank Neighbors' : 'Community Neighbors'}</h3>
                 <div className="mb-3 sort-by text-end">
                     Sort by
                     <MemberSortNeighborsDropdown sort={sort} handleSort={handleSort} />
@@ -174,7 +176,7 @@ export default function MemberDetails() {
                         </div>
                     </div>
                 </div>
-                <h3 className="mt-5 mb-3">Community Neighbors</h3>
+                <h3 className="mt-5 mb-3">{network === 'lank' ? 'Lank Neighbors' : 'Community Neighbors'}</h3>
                 <div className="mb-3 sort-by text-end">
                     Sort by
                     <MemberSortNeighborsDropdown sort={sort} handleSort={handleSort} />
@@ -208,7 +210,7 @@ export default function MemberDetails() {
                         </div>
                     </div>
                 </div>
-                <h3 className="mt-5 mb-3">Community Neighbors</h3>
+                <h3 className="mt-5 mb-3">{network === 'lank' ? 'Lank Neighbors' : 'Community Neighbors'}</h3>
                 <div className="mb-3 sort-by text-end">
                     Sort by
                     <MemberSortNeighborsDropdown sort={sort} handleSort={handleSort} />

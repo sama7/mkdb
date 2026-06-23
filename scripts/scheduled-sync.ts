@@ -15,6 +15,13 @@ const BUFFER_MS = 30 * 60 * 1000;   // 30-min safety buffer between sync end and
 const LOOKBACK = 5;                 // how many prior weekly syncs to consult
 const FALLBACK_DURATION_MS = 60 * 60 * 1000;   // assume 1h if no prior logs found
 
+// Optional one-off override. When set, the planned duration is max(computed,
+// SYNC_MIN_BUDGET_MS). Useful for the first run after a known scope expansion
+// (e.g. adding the lycan pool) where the data-driven max from prior weeks is
+// still based on the smaller scope. Remove from cron once the new steady-state
+// is reflected in prior logs.
+const OVERRIDE_BUDGET_MS = parseInt(process.env.SYNC_MIN_BUDGET_MS || '0', 10);
+
 function parseDoneDuration(content: string): number | null {
     // Match the orchestrator's summary line, e.g.:
     //   [sync] done in 1h 9m 48s (...)
@@ -76,11 +83,18 @@ async function main() {
         console.log(`[scheduled-sync] prior: ${s.file} → ${fmtMs(s.ms)}`);
     }
 
-    const planned = max ?? FALLBACK_DURATION_MS;
+    const computed = max ?? FALLBACK_DURATION_MS;
     if (max === null) {
         console.log(`[scheduled-sync] no prior sync logs parseable; using fallback budget ${fmtMs(FALLBACK_DURATION_MS)}`);
     } else {
-        console.log(`[scheduled-sync] longest of last ${samples.length}: ${fmtMs(planned)}`);
+        console.log(`[scheduled-sync] longest of last ${samples.length}: ${fmtMs(computed)}`);
+    }
+
+    const planned = Math.max(computed, OVERRIDE_BUDGET_MS);
+    if (OVERRIDE_BUDGET_MS > 0 && OVERRIDE_BUDGET_MS > computed) {
+        console.log(`[scheduled-sync] override SYNC_MIN_BUDGET_MS=${fmtMs(OVERRIDE_BUDGET_MS)} raises budget over computed ${fmtMs(computed)}`);
+    } else if (OVERRIDE_BUDGET_MS > 0) {
+        console.log(`[scheduled-sync] override SYNC_MIN_BUDGET_MS=${fmtMs(OVERRIDE_BUDGET_MS)} <= computed; ignoring`);
     }
 
     const midnight = nextMidnightMs();

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import Pagination from './Pagination';
 import { useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { useNetwork } from '../network';
 import Spinner from 'react-bootstrap/Spinner';
 import CircleProgress from './CircleProgress';
 import FilmCardAgreed from './FilmCardAgreed';
@@ -9,6 +10,7 @@ import FilmCardDiffer from './FilmCardDiffer';
 import type { Member, NeighborFilm, NeighborSummary } from '../types';
 
 export default function NeighborDetails() {
+    const { apiBase, urlBase } = useNetwork();
     const { username_a, username_b } = useParams();
     const [firstMember, setFirstMember] = useState<Member | null>(null);
     const [firstMemberNotFound, setFirstMemberNotFound] = useState(false);
@@ -51,7 +53,7 @@ export default function NeighborDetails() {
         setFirstMemberLoading(true);
         const fetchFirstMemberDetails = async () => {
             try {
-                const response = await fetch(`/api/members/${username_a}`);
+                const response = await fetch(`${apiBase}/members/${username_a}`);
                 if (response.ok) {
                     const data = await response.json() as Member | null;
                     if (data) {
@@ -79,7 +81,7 @@ export default function NeighborDetails() {
         setSecondMemberLoading(true);
         const fetchSecondMemberDetails = async () => {
             try {
-                const response = await fetch(`/api/members/${username_b}`);
+                const response = await fetch(`${apiBase}/members/${username_b}`);
                 if (response.ok) {
                     const data = await response.json() as Member | null;
                     if (data) {
@@ -107,7 +109,7 @@ export default function NeighborDetails() {
         setNeighborDetailsLoading(true);
         const fetchNeighborDetails = async () => {
             try {
-                const response = await fetch(`/api/neighbors/${username_a}/${username_b}`);
+                const response = await fetch(`${apiBase}/neighbors/${username_a}/${username_b}`);
                 const data = await response.json() as NeighborSummary | null;
                 if (data?.similarity_score) {
                     setSimilarityScore(data.similarity_score);
@@ -126,7 +128,7 @@ export default function NeighborDetails() {
     useEffect(() => {
         const fetchNeighborAgreedFilms = async () => {
             try {
-                const response = await fetch(`/api/neighbors-agreed/${username_a}/${username_b}?page=${agreedPage}`);
+                const response = await fetch(`${apiBase}/neighbors-agreed/${username_a}/${username_b}?page=${agreedPage}`);
                 const rows = await response.json() as NeighborFilm[];
                 setAgreedFilms(rows);
                 console.log(`Agreed films query returned ${rows.length} rows.`);
@@ -150,7 +152,7 @@ export default function NeighborDetails() {
     useEffect(() => {
         const fetchNeighborDifferFilms = async () => {
             try {
-                const response = await fetch(`/api/neighbors-differ/${username_a}/${username_b}?page=${differPage}`);
+                const response = await fetch(`${apiBase}/neighbors-differ/${username_a}/${username_b}?page=${differPage}`);
                 const rows = await response.json() as NeighborFilm[];
                 setDifferFilms(rows);
                 console.log(`Differ films query returned ${rows.length} rows.`);
@@ -281,7 +283,7 @@ export default function NeighborDetails() {
                     />
                     <div className="username-and-watched">
                         <div className="username">
-                            <Link to={`/members/${firstMember?.username}`}>
+                            <Link to={`${urlBase}/members/${firstMember?.username}`}>
                                 {firstMember?.display_name}
                             </Link>
                         </div>
@@ -305,7 +307,7 @@ export default function NeighborDetails() {
                     />
                     <div className="username-and-watched">
                         <div className="username">
-                            <Link to={`/members/${secondMember?.username}`}>
+                            <Link to={`${urlBase}/members/${secondMember?.username}`}>
                                 {secondMember?.display_name}
                             </Link>
                         </div>
@@ -341,7 +343,7 @@ export default function NeighborDetails() {
                     />
                     <div className="username-and-watched">
                         <div className="username">
-                            <Link to={`/members/${firstMember?.username}`}>
+                            <Link to={`${urlBase}/members/${firstMember?.username}`}>
                                 {firstMember?.display_name}
                             </Link>
                         </div>
@@ -365,7 +367,7 @@ export default function NeighborDetails() {
                     />
                     <div className="username-and-watched">
                         <div className="username">
-                            <Link to={`/members/${secondMember?.username}`}>
+                            <Link to={`${urlBase}/members/${secondMember?.username}`}>
                                 {secondMember?.display_name}
                             </Link>
                         </div>
@@ -435,7 +437,7 @@ export default function NeighborDetails() {
                     />
                     <div className="username-and-watched">
                         <div className="username">
-                            <Link to={`/members/${firstMember?.username}`}>
+                            <Link to={`${urlBase}/members/${firstMember?.username}`}>
                                 {firstMember?.display_name}
                             </Link>
                         </div>
@@ -459,7 +461,7 @@ export default function NeighborDetails() {
                     />
                     <div className="username-and-watched">
                         <div className="username">
-                            <Link to={`/members/${secondMember?.username}`}>
+                            <Link to={`${urlBase}/members/${secondMember?.username}`}>
                                 {secondMember?.display_name}
                             </Link>
                         </div>
@@ -523,7 +525,7 @@ export default function NeighborDetails() {
                 />
                 <div className="username-and-watched">
                     <div className="username">
-                        <Link to={`/members/${firstMember?.username}`}>
+                        <Link to={`${urlBase}/members/${firstMember?.username}`}>
                             {firstMember?.display_name}
                         </Link>
                     </div>
@@ -547,7 +549,7 @@ export default function NeighborDetails() {
                 />
                 <div className="username-and-watched">
                     <div className="username">
-                        <Link to={`/members/${secondMember?.username}`}>
+                        <Link to={`${urlBase}/members/${secondMember?.username}`}>
                             {secondMember?.display_name}
                         </Link>
                     </div>
