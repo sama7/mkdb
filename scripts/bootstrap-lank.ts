@@ -171,17 +171,16 @@ async function appendLankRankingsAndSimilarity(): Promise<void> {
         SELECT user_a, user_b, overlap_count, avg_rating_distance, similarity_score, 'lank', NOW() FROM sym
     `);
 
-    // Append lank ranking snapshot at the CURRENT max(week) of metro (so both
-    // networks share the same week index going forward). We're not advancing
-    // the week — that happens during the next regular promote.
+    // Append lank ranking snapshot at lank's own next week (lank has its own
+    // counter, independent of metro). First bootstrap → week 1.
     await pool.query(`
-        WITH current_week AS (
-            SELECT COALESCE(MAX(week), 0) AS w FROM film_rankings_history
+        WITH next_lank AS (
+            SELECT COALESCE(MAX(week), 0) + 1 AS w FROM film_rankings_history WHERE network = 'lank'
         )
         INSERT INTO film_rankings_history (film_id, ranking, week, network, week_computed_at)
         SELECT f.film_id,
                ROW_NUMBER() OVER (ORDER BY AVG(r.rating) DESC, COUNT(r.rating) DESC, f.film_id ASC) AS ranking,
-               (SELECT w FROM current_week),
+               (SELECT w FROM next_lank),
                'lank',
                NOW()
           FROM films f

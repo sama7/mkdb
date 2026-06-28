@@ -75,7 +75,7 @@ Two parallel communities ride on the same `users` / `ratings` / `films` tables:
 
 The two seeds overlap (~25 users at time of writing). A user followed by both is stored once with `is_metro = is_lycan = true`; their ratings sync once. Each sync's discover step calls Letterboxd's API for both seeds in turn and OR-merges the network flags into one `users_stg` row per Letterboxd ID.
 
-Each promote computes two ranking snapshots (one per network) into `film_rankings_history` and two similarity-score sets into `user_similarity_scores`. The week counter is shared so both networks advance in lockstep. metro's HAVING floor is `>= 10` raters (community is ~340 users); lank lowers it to `>= 5` since the lycan pool is ~10× smaller.
+Each promote computes two ranking snapshots (one per network) into `film_rankings_history` and two similarity-score sets into `user_similarity_scores`. **Each network has its own week counter** — metro started at 1 in early 2026 and ticks weekly; lank started at 1 with the bootstrap and advances each Sunday alongside metro. They are not in lockstep. metro's HAVING floor is `>= 10` raters (community is ~340 users); lank lowers it to `>= 5` since the lycan pool is ~10× smaller.
 
 ## Environment variables
 

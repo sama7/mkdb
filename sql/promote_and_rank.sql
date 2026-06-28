@@ -100,14 +100,17 @@ SELECT user_a, user_b, overlap_count, avg_rating_distance, similarity_score, 'la
 -- Metro requires >= 10 raters (community is ~340 users); lank lowers the
 -- floor to >= 5 since the lycan pool is ~10x smaller and >= 10 would yield
 -- only ~230 films.
-WITH next_week AS (
-    SELECT COALESCE(MAX(week), 0) + 1 AS w FROM film_rankings_history
+-- Each network has its own monotonic week counter — metro started at 1 and
+-- has been ticking weekly; lank started at 1 with the bootstrap. They are
+-- not in lockstep.
+WITH next_metro AS (
+    SELECT COALESCE(MAX(week), 0) + 1 AS w FROM film_rankings_history WHERE network = 'metro'
 )
 INSERT INTO film_rankings_history (film_id, ranking, week, network, week_computed_at)
 SELECT
     f.film_id,
     ROW_NUMBER() OVER (ORDER BY AVG(r.rating) DESC, COUNT(r.rating) DESC, f.film_id ASC) AS ranking,
-    (SELECT w FROM next_week),
+    (SELECT w FROM next_metro),
     'metro',
     NOW()
   FROM films f
@@ -118,16 +121,14 @@ SELECT
 HAVING COUNT(r.rating) >= 10
 LIMIT 1000;
 
-WITH next_week AS (
-    SELECT COALESCE(MAX(week), 0) AS w FROM film_rankings_history
-    -- already incremented by the metro insert above; promote always inserts
-    -- both networks in lockstep so MAX(week) IS the current week here
+WITH next_lank AS (
+    SELECT COALESCE(MAX(week), 0) + 1 AS w FROM film_rankings_history WHERE network = 'lank'
 )
 INSERT INTO film_rankings_history (film_id, ranking, week, network, week_computed_at)
 SELECT
     f.film_id,
     ROW_NUMBER() OVER (ORDER BY AVG(r.rating) DESC, COUNT(r.rating) DESC, f.film_id ASC) AS ranking,
-    (SELECT w FROM next_week),
+    (SELECT w FROM next_lank),
     'lank',
     NOW()
   FROM films f
@@ -138,11 +139,14 @@ SELECT
 HAVING COUNT(r.rating) >= 5
 LIMIT 1000;
 
--- 4. Trim ranking history to the current week + previous 2 weeks, per network.
--- We can use a single threshold (max week minus 2) because both networks share
--- the week numbering and are appended together each cycle.
-DELETE FROM film_rankings_history
- WHERE week < (SELECT MAX(week) - 2 FROM film_rankings_history);
+-- 4. Trim ranking history to the current week + previous 2 weeks, PER NETWORK.
+-- Each network has its own counter so we can't use a single global threshold.
+DELETE FROM film_rankings_history frh
+ USING (
+     SELECT network, MAX(week) AS max_w FROM film_rankings_history GROUP BY network
+ ) m
+ WHERE frh.network = m.network
+   AND frh.week    < m.max_w - 2;
 
 -- 5. Empty staging so orphan films are no longer referenced by ratings_stg.
 TRUNCATE TABLE ratings_stg;
