@@ -12,6 +12,7 @@
     "sync": "node dist/sync/index.js",
     "sync:scheduled": "node dist/scripts/scheduled-sync.js",
     "promote": "node dist/scripts/promote.js",
+    "update-letterboxd-list": "node dist/scripts/update-letterboxd-list.js",
     "backfill-film-lids": "node scripts/backfill-film-lids.js"
   },
   "keywords": [],

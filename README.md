@@ -153,10 +153,11 @@ npm install --include=optional
 
 ## Weekly sync
 
-Two stages, run separately so they can be scheduled and monitored independently:
+Three stages, scheduled and monitored independently:
 
 - `npm run sync` — discover community members → pull ratings into staging → fetch details + posters for new films. Truncates staging at the start so each run is self-contained. Recent runs take ~45-50 minutes.
 - `npm run promote` — swap staging into live tables in one transaction, recompute similarity, append the new ranking week, trim history to 3 weeks, delete orphan films + posters. Typically <30 seconds.
+- `npm run update-letterboxd-list` — push the latest metro top 1000 to [letterboxd.com/samah_/list/mkdb-top-1000/](https://letterboxd.com/samah_/list/mkdb-top-1000/) via the Letterboxd API. Auth uses `LETTERBOXD_REFRESH_TOKEN` (authorization_code grant — required for write scope on owner's lists). The crontab chains this with `&&` after promote, so a botched promote skips the list push and doesn't stamp stale data on Letterboxd. ~7-8 minutes per run (Letterboxd's PATCH /list/{id} entries API is quirky — see source comments).
 
 ```bash
 # Manual local run (one-off)
