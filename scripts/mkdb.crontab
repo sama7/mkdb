@@ -30,8 +30,9 @@ PATH=/usr/bin:/bin
 
 # Mon 12:00 AM ET — swap staging into live, recompute similarity, append the
 # new ranking week, trim history, delete orphan films + posters. Promote
-# itself takes ~30 sec; the chained update-letterboxd-list pushes the new
-# metro top 1000 to letterboxd.com/samah_/list/mkdb-top-1000/ via API
-# (~7-8 min, requires LETTERBOXD_REFRESH_TOKEN). && skips the list update if
-# promote fails so a botched promote doesn't push stale data to Letterboxd.
-0  0 * * 1 cd /root/mkdb && npm run promote && npm run update-letterboxd-list >> dumps/promote_$(date +\%F).log 2>&1
+# itself takes ~30 sec. After it succeeds, push both top-1000 lists to
+# Letterboxd via the API (metro first, then lank). Each list update takes
+# ~7-8 min, so total ~16-17 min finishing by ~00:17 AM Monday. Requires
+# LETTERBOXD_REFRESH_TOKEN. && short-circuits on any earlier failure so
+# stale data isn't pushed to Letterboxd.
+0  0 * * 1 cd /root/mkdb && npm run promote && npm run update-letterboxd-list:metro && npm run update-letterboxd-list:lank >> dumps/promote_$(date +\%F).log 2>&1
