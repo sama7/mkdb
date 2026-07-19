@@ -18,15 +18,8 @@ PATH=/usr/bin:/bin
 # computed start time (next midnight − max of last 5 syncs' duration − 30 min
 # buffer) and then runs the actual sync. 5 PM gives the wrapper up to 7
 # hours of headroom — plenty for any realistic max-duration since steady-
-# state syncs run ~50 min. See scripts/scheduled-sync.ts.
-#
-# SYNC_MIN_BUDGET_MS=9000000 (2h 30m) is a temporary override active while
-# the first few lank-inclusive syncs build up history. Without it, the
-# scheduler would still use the metro-only max from prior weeks (~1h 10m)
-# even though the new run pulls ratings for ~14 additional lycan-only users
-# and may run longer. Remove the override once the 5-week lookback contains
-# enough lank-inclusive runs to reflect the new steady-state.
-0 17 * * 0 cd /root/mkdb && SYNC_MIN_BUDGET_MS=9000000 npm run sync:scheduled >> dumps/sync_$(date +\%F).log 2>&1
+# state syncs (metro + lank) run ~42-49 min. See scripts/scheduled-sync.ts.
+0 17 * * 0 cd /root/mkdb && npm run sync:scheduled >> dumps/sync_$(date +\%F).log 2>&1
 
 # Mon 12:00 AM ET — swap staging into live, recompute similarity, append the
 # new ranking week, trim history, delete orphan films + posters. Promote
