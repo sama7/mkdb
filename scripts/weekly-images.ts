@@ -62,6 +62,7 @@ const WHITE = 'rgba(255,255,255,0.92)';
 const GREEN = '#08c434';
 const RED = '#ff4d4d';
 const FONT = 'Roboto';
+const LABEL_FONT_SIZE = 26;
 
 function esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -96,8 +97,30 @@ async function resolvePosterFile(slug: string): Promise<string> {
 export interface GridItem {
     slug: string;
     rank: string;                       // primary label, e.g. "1", "504", "(781)"
-    change?: string;                    // secondary label, e.g. "▲259"
-    changeColor?: string;               // color for `change`
+    change?: string;                    // secondary label numeric part, e.g. "259"
+    changeColor?: string;               // color for `change` + the direction arrow
+    dir?: 'up' | 'down';                // draws a ▲/▼ polygon before `change`
+}
+
+// Per-character rendered widths at the label font, so we can position the
+// rank text / arrow polygon / change number without a sharp measure per
+// label. Roboto renders SVG arrow glyphs as tofu on a fontless host, so the
+// arrows are drawn as polygons instead — which means we can't lean on a
+// single centered <text> and have to lay the pieces out ourselves.
+let charWidthCache: Map<string, number> | null = null;
+async function charWidths(): Promise<Map<string, number>> {
+    if (charWidthCache) return charWidthCache;
+    const m = new Map<string, number>();
+    for (const c of '0123456789()') {
+        m.set(c, await measureTextWidth(c, LABEL_FONT_SIZE, 600));
+    }
+    charWidthCache = m;
+    return m;
+}
+function textWidth(str: string, widths: Map<string, number>): number {
+    let w = 0;
+    for (const c of str) w += widths.get(c) ?? LABEL_FONT_SIZE * 0.55;
+    return w;
 }
 
 export interface RenderOpts {
@@ -115,24 +138,39 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
     const cellY = (row: number) => OUTER + HEADER_H + row * (CARD_H + GAP);
 
     // ---- Back overlay: background, header text, card backgrounds, labels ----
+    const widths = await charWidths();
     const cardRects: string[] = [];
-    const labelTexts: string[] = [];
+    const labelParts: string[] = [];
+    // Arrow geometry (drawn as polygons; Roboto has no ▲/▼ glyph).
+    const ARROW_W = 15, ARROW_H = 15, GAP_RANK_ARROW = 9, GAP_ARROW_NUM = 5;
     items.forEach((it, i) => {
         const col = i % COLS, row = Math.floor(i / COLS);
         const x = cellX(col), y = cellY(row);
         cardRects.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="6" fill="${CARD_BG}"/>`);
 
         const labelCenterX = x + CARD_W / 2;
-        const labelY = y + CARD_PAD + CELL_H + LABEL_H / 2 + 9;   // vertically center-ish in strip
-        const rankSpan = `<tspan fill="${WHITE}">${esc(it.rank)}</tspan>`;
-        // dx adds an explicit gap before the indicator; a plain leading space
-        // in a tspan gets collapsed by the SVG renderer.
-        const changeSpan = it.change
-            ? `<tspan fill="${it.changeColor || WHITE}" dx="8">${esc(it.change)}</tspan>`
-            : '';
-        labelTexts.push(
-            `<text x="${labelCenterX}" y="${labelY}" text-anchor="middle" font-family="${FONT}" font-size="26" font-weight="600">${rankSpan}${changeSpan}</text>`,
-        );
+        const labelBaseline = y + CARD_PAD + CELL_H + LABEL_H / 2 + 9;
+
+        if (it.change && it.dir) {
+            // rank  ▲/▼  change  — laid out as a centered group.
+            const rankW = textWidth(it.rank, widths);
+            const numW = textWidth(it.change, widths);
+            const total = rankW + GAP_RANK_ARROW + ARROW_W + GAP_ARROW_NUM + numW;
+            const left = labelCenterX - total / 2;
+            const color = it.changeColor || WHITE;
+            labelParts.push(`<text x="${left}" y="${labelBaseline}" font-family="${FONT}" font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${WHITE}">${esc(it.rank)}</text>`);
+            const ax = left + rankW + GAP_RANK_ARROW;
+            const ayTop = labelBaseline - 20;   // align arrow with the digits' visual band
+            const pts = it.dir === 'up'
+                ? `${ax},${ayTop + ARROW_H} ${ax + ARROW_W},${ayTop + ARROW_H} ${ax + ARROW_W / 2},${ayTop}`
+                : `${ax},${ayTop} ${ax + ARROW_W},${ayTop} ${ax + ARROW_W / 2},${ayTop + ARROW_H}`;
+            labelParts.push(`<polygon points="${pts}" fill="${color}"/>`);
+            const numX = ax + ARROW_W + GAP_ARROW_NUM;
+            labelParts.push(`<text x="${numX}" y="${labelBaseline}" font-family="${FONT}" font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${color}">${esc(it.change)}</text>`);
+        } else {
+            // rank only — centered.
+            labelParts.push(`<text x="${labelCenterX}" y="${labelBaseline}" text-anchor="middle" font-family="${FONT}" font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${WHITE}">${esc(it.rank)}</text>`);
+        }
     });
 
     // Header is horizontally centered. When an icon is present, the whole
@@ -161,7 +199,7 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
         `<rect width="${width}" height="${height}" fill="${BG}"/>` +
         cardRects.join('') +
         headerText +
-        labelTexts.join('') +
+        labelParts.join('') +
         `</svg>`,
     );
 
@@ -223,7 +261,7 @@ async function fetchRisers(): Promise<GridItem[]> {
           JOIN films f ON f.film_id=c.film_id
          WHERE c.network='metro' AND c.week=(SELECT w FROM cur) AND p.ranking > c.ranking
          ORDER BY change DESC LIMIT 20`);
-    return rows.map((r) => ({ slug: r.slug, rank: String(r.current_rank), change: `▲${r.change}`, changeColor: GREEN }));
+    return rows.map((r) => ({ slug: r.slug, rank: String(r.current_rank), change: String(r.change), changeColor: GREEN, dir: 'up' as const }));
 }
 
 async function fetchFallers(): Promise<GridItem[]> {
@@ -235,7 +273,7 @@ async function fetchFallers(): Promise<GridItem[]> {
           JOIN films f ON f.film_id=c.film_id
          WHERE c.network='metro' AND c.week=(SELECT w FROM cur) AND c.ranking > p.ranking
          ORDER BY change DESC LIMIT 20`);
-    return rows.map((r) => ({ slug: r.slug, rank: String(r.current_rank), change: `▼${r.change}`, changeColor: RED }));
+    return rows.map((r) => ({ slug: r.slug, rank: String(r.current_rank), change: String(r.change), changeColor: RED, dir: 'down' as const }));
 }
 
 async function fetchNewEntries(): Promise<GridItem[]> {
