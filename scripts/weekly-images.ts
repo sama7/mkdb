@@ -150,7 +150,7 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
     // exactly like mkdb.co/new (which uses `<span>▲ {change}</span>` at 0.7em).
     // Roboto lacks the triangle glyphs, so they fall back to the bundled Inter
     // (the site's own font) — glyph-accurate and baseline-aligned, no polygon.
-    const GAP_RANK_CHANGE = 8 * SCALE;   // matches the site's space + 0.25em margin-left
+    const GAP_RANK_CHANGE = 14 * SCALE;   // space between the rank and the ▲/▼ indicator
     for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const col = i % COLS, row = Math.floor(i / COLS);
