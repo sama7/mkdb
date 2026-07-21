@@ -15,6 +15,7 @@
     "update-letterboxd-list": "node dist/scripts/update-letterboxd-list.js metro",
     "update-letterboxd-list:metro": "node dist/scripts/update-letterboxd-list.js metro",
     "update-letterboxd-list:lank": "node dist/scripts/update-letterboxd-list.js lank",
+    "post-weekly-update": "node dist/scripts/post-weekly-update.js",
     "backfill-film-lids": "node scripts/backfill-film-lids.js"
   },
   "keywords": [],

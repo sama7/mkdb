@@ -157,7 +157,10 @@ Three stages, scheduled and monitored independently:
 
 - `npm run sync` — discover community members → pull ratings into staging → fetch details + posters for new films. Truncates staging at the start so each run is self-contained. Recent runs take ~45-50 minutes.
 - `npm run promote` — swap staging into live tables in one transaction, recompute similarity, append the new ranking week, trim history to 3 weeks, delete orphan films + posters. Typically <30 seconds.
-- `npm run update-letterboxd-list` — push the latest metro top 1000 to [letterboxd.com/samah_/list/mkdb-top-1000/](https://letterboxd.com/samah_/list/mkdb-top-1000/) via the Letterboxd API. Auth uses `LETTERBOXD_REFRESH_TOKEN` (authorization_code grant — required for write scope on owner's lists). The crontab chains this with `&&` after promote, so a botched promote skips the list push and doesn't stamp stale data on Letterboxd. ~7-8 minutes per run (Letterboxd's PATCH /list/{id} entries API is quirky — see source comments).
+- `npm run update-letterboxd-list:metro` / `:lank` — push the latest top 1000 for each network to Letterboxd ([mkdb-top-1000](https://letterboxd.com/samah_/list/mkdb-top-1000/) / [lkdb-top-1000](https://letterboxd.com/samah_/list/lkdb-top-1000/)) via the Letterboxd API. Auth uses `LETTERBOXD_REFRESH_TOKEN` (authorization_code grant — required for write scope on owner's lists). ~7-8 minutes per run (Letterboxd's PATCH /list/{id} entries API is quirky — see source comments).
+- `npm run post-weekly-update` — post the weekly status to Discord **#mank** as the bot: the `MKDb Week N is now live` message plus five grid images (top ranked, risers, fallers, new entries, new departures) generated server-side by [`scripts/weekly-images.ts`](scripts/weekly-images.ts) with `sharp`. Needs `DISCORD_TOKEN`. Text is rendered via the bundled font in [`assets/fonts/Roboto.ttf`](assets/fonts/) (the VPS has no system fonts, so the script points fontconfig at the bundled font at runtime — nothing to install).
+
+The crontab chains promote → metro list → lank list → Discord post with `&&`, so each step is gated on the previous succeeding and a botched promote never propagates stale data downstream.
 
 ```bash
 # Manual local run (one-off)
