@@ -40,7 +40,7 @@ async function postToDiscord(content: string, images: { filename: string; buffer
         // Wrap in a fresh Uint8Array so the BlobPart type is a plain
         // ArrayBuffer view (Node's Buffer is ArrayBufferLike, which the DOM
         // Blob typings reject).
-        form.append(`files[${i}]`, new Blob([new Uint8Array(img.buffer)], { type: 'image/png' }), img.filename);
+        form.append(`files[${i}]`, new Blob([new Uint8Array(img.buffer)], { type: 'image/jpeg' }), img.filename);
     });
 
     const res = await fetch(`https://discord.com/api/v10/channels/${CHANNEL_ID}/messages`, {

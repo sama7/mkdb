@@ -44,14 +44,20 @@ function ensureFontconfig(): void {
 }
 ensureFontconfig();
 
+// Overall resolution multiplier. Source posters are 300×450, so the base
+// layout (SCALE=1) renders poster cells at 230px; higher SCALE yields a
+// larger, crisper image that downscales cleanly on high-DPI displays (posters
+// upscale mildly above ~1.3×). Override with WEEKLY_IMAGE_SCALE.
+const SCALE = Number(process.env.WEEKLY_IMAGE_SCALE || 2);
+
 // Layout — tuned to resemble the site's poster grid at a legible size.
 const COLS = 4;
-const CELL_W = 230, CELL_H = 345;      // poster dimensions
-const CARD_PAD = 10;                   // padding between card edge and poster
-const LABEL_H = 52;                    // label strip height below each poster
-const GAP = 16;                        // gap between cards
-const HEADER_H = 104;
-const OUTER = 18;
+const CELL_W = Math.round(230 * SCALE), CELL_H = Math.round(345 * SCALE);   // poster dimensions
+const CARD_PAD = Math.round(10 * SCALE);   // padding between card edge and poster
+const LABEL_H = Math.round(52 * SCALE);    // label strip height below each poster
+const GAP = Math.round(16 * SCALE);        // gap between cards
+const HEADER_H = Math.round(104 * SCALE);
+const OUTER = Math.round(18 * SCALE);
 const CARD_W = CELL_W + CARD_PAD * 2;
 const CARD_H = CELL_H + CARD_PAD + LABEL_H;
 
@@ -59,10 +65,14 @@ const BG = '#242424';
 const CARD_BG = '#141414';
 const BORDER = 'rgba(255,255,255,0.14)';
 const WHITE = 'rgba(255,255,255,0.92)';
+// Match mkdb.co's CSS exactly: .rank-up-risers { color:#08c434 }, .rank-down-fallers { color:red }.
 const GREEN = '#08c434';
-const RED = '#ff4d4d';
+const RED = '#ff0000';
 const FONT = 'Roboto';
-const LABEL_FONT_SIZE = 26;
+const LABEL_FONT_SIZE = 26 * SCALE;    // white rank number
+const CHANGE_FONT_SIZE = 22 * SCALE;   // green/red change — smaller than the rank
+const HEADER_FONT_SIZE = 40 * SCALE;
+const BORDER_W = Math.max(1, Math.round(1 * SCALE));
 
 function esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -102,26 +112,22 @@ export interface GridItem {
     dir?: 'up' | 'down';                // draws a ▲/▼ polygon before `change`
 }
 
-// Per-character rendered widths at the label font, so we can position the
-// rank text / arrow polygon / change number without a sharp measure per
-// label. Roboto renders SVG arrow glyphs as tofu on a fontless host, so the
-// arrows are drawn as polygons instead — which means we can't lean on a
-// single centered <text> and have to lay the pieces out ourselves.
-let charWidthCache: Map<string, number> | null = null;
-async function charWidths(): Promise<Map<string, number>> {
-    if (charWidthCache) return charWidthCache;
-    const m = new Map<string, number>();
-    for (const c of '0123456789()') {
-        m.set(c, await measureTextWidth(c, LABEL_FONT_SIZE, 600));
-    }
-    charWidthCache = m;
-    return m;
-}
-function textWidth(str: string, widths: Map<string, number>): number {
-    let w = 0;
-    for (const c of str) w += widths.get(c) ?? LABEL_FONT_SIZE * 0.55;
+// Rendered ink width of a label string, cached. Roboto renders SVG arrow
+// glyphs as tofu on a fontless host, so the ▲/▼ indicators are drawn as
+// polygons instead — which means we lay out the rank text / arrow / change
+// number ourselves and need each text run's actual width. We measure the
+// FULL string (not sum of per-char widths, which drops inter-digit spacing
+// and would place the arrow too close to the rank).
+const labelWidthCache = new Map<string, number>();
+async function measureLabel(str: string, size: number): Promise<number> {
+    const key = `${size}:${str}`;
+    const cached = labelWidthCache.get(key);
+    if (cached !== undefined) return cached;
+    const w = await measureTextWidth(str, size, 600);
+    labelWidthCache.set(key, w);
     return w;
 }
+
 
 export interface RenderOpts {
     title: string;
@@ -138,47 +144,44 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
     const cellY = (row: number) => OUTER + HEADER_H + row * (CARD_H + GAP);
 
     // ---- Back overlay: background, header text, card backgrounds, labels ----
-    const widths = await charWidths();
     const cardRects: string[] = [];
     const labelParts: string[] = [];
-    // Arrow geometry (drawn as polygons; Roboto has no ▲/▼ glyph).
-    const ARROW_W = 15, ARROW_H = 15, GAP_RANK_ARROW = 9, GAP_ARROW_NUM = 5;
-    items.forEach((it, i) => {
+    // The ▲/▼ indicator is rendered as a real text glyph at the change size,
+    // exactly like mkdb.co/new (which uses `<span>▲ {change}</span>` at 0.7em).
+    // Roboto lacks the triangle glyphs, so they fall back to the bundled Inter
+    // (the site's own font) — glyph-accurate and baseline-aligned, no polygon.
+    const GAP_RANK_CHANGE = 8 * SCALE;   // matches the site's space + 0.25em margin-left
+    for (let i = 0; i < items.length; i++) {
+        const it = items[i];
         const col = i % COLS, row = Math.floor(i / COLS);
         const x = cellX(col), y = cellY(row);
-        cardRects.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="6" fill="${CARD_BG}"/>`);
+        cardRects.push(`<rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="${6 * SCALE}" fill="${CARD_BG}"/>`);
 
         const labelCenterX = x + CARD_W / 2;
-        const labelBaseline = y + CARD_PAD + CELL_H + LABEL_H / 2 + 9;
+        const labelBaseline = y + CARD_PAD + CELL_H + LABEL_H / 2 + 9 * SCALE;
 
         if (it.change && it.dir) {
-            // rank  ▲/▼  change  — laid out as a centered group.
-            const rankW = textWidth(it.rank, widths);
-            const numW = textWidth(it.change, widths);
-            const total = rankW + GAP_RANK_ARROW + ARROW_W + GAP_ARROW_NUM + numW;
-            const left = labelCenterX - total / 2;
+            // rank  +  "▲/▼ change"  — laid out as a centered group sharing one
+            // baseline. The change run (arrow + number) is a bit smaller.
+            const changeStr = `${it.dir === 'up' ? '▲' : '▼'} ${it.change}`;
+            const rankW = await measureLabel(it.rank, LABEL_FONT_SIZE);
+            const changeW = await measureLabel(changeStr, CHANGE_FONT_SIZE);
+            const left = labelCenterX - (rankW + GAP_RANK_CHANGE + changeW) / 2;
             const color = it.changeColor || WHITE;
             labelParts.push(`<text x="${left}" y="${labelBaseline}" font-family="${FONT}" font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${WHITE}">${esc(it.rank)}</text>`);
-            const ax = left + rankW + GAP_RANK_ARROW;
-            const ayTop = labelBaseline - 20;   // align arrow with the digits' visual band
-            const pts = it.dir === 'up'
-                ? `${ax},${ayTop + ARROW_H} ${ax + ARROW_W},${ayTop + ARROW_H} ${ax + ARROW_W / 2},${ayTop}`
-                : `${ax},${ayTop} ${ax + ARROW_W},${ayTop} ${ax + ARROW_W / 2},${ayTop + ARROW_H}`;
-            labelParts.push(`<polygon points="${pts}" fill="${color}"/>`);
-            const numX = ax + ARROW_W + GAP_ARROW_NUM;
-            labelParts.push(`<text x="${numX}" y="${labelBaseline}" font-family="${FONT}" font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${color}">${esc(it.change)}</text>`);
+            labelParts.push(`<text x="${left + rankW + GAP_RANK_CHANGE}" y="${labelBaseline}" font-family="${FONT}" font-size="${CHANGE_FONT_SIZE}" font-weight="600" fill="${color}">${esc(changeStr)}</text>`);
         } else {
             // rank only — centered.
             labelParts.push(`<text x="${labelCenterX}" y="${labelBaseline}" text-anchor="middle" font-family="${FONT}" font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${WHITE}">${esc(it.rank)}</text>`);
         }
-    });
+    }
 
     // Header is horizontally centered. When an icon is present, the whole
     // group (title + gap + icon) is centered as a unit — the title text is
     // left-anchored at the group's left edge and the icon sits after it.
-    const ICON_H = 44, ICON_GAP = 14;
-    const headerY = OUTER + 62;
-    const titleW = await measureTextWidth(title, 40, 700);
+    const ICON_H = Math.round(44 * SCALE), ICON_GAP = Math.round(14 * SCALE);
+    const headerY = OUTER + Math.round(62 * SCALE);
+    const titleW = await measureTextWidth(title, HEADER_FONT_SIZE, 700);
     let headerText: string;
     let iconComposite: sharp.OverlayOptions | null = null;
 
@@ -188,10 +191,10 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
         const iconW = (await sharp(icon).metadata()).width || ICON_H;
         const groupW = titleW + ICON_GAP + iconW;
         const groupLeft = (width - groupW) / 2;
-        headerText = `<text x="${groupLeft}" y="${headerY}" font-family="${FONT}" font-size="40" font-weight="700" fill="${WHITE}">${esc(title)}</text>`;
-        iconComposite = { input: icon, left: Math.round(groupLeft + titleW + ICON_GAP), top: Math.round(headerY - ICON_H + 6) };
+        headerText = `<text x="${groupLeft}" y="${headerY}" font-family="${FONT}" font-size="${HEADER_FONT_SIZE}" font-weight="700" fill="${WHITE}">${esc(title)}</text>`;
+        iconComposite = { input: icon, left: Math.round(groupLeft + titleW + ICON_GAP), top: Math.round(headerY - ICON_H + 6 * SCALE) };
     } else {
-        headerText = `<text x="${width / 2}" y="${headerY}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="700" fill="${WHITE}">${esc(title)}</text>`;
+        headerText = `<text x="${width / 2}" y="${headerY}" text-anchor="middle" font-family="${FONT}" font-size="${HEADER_FONT_SIZE}" font-weight="700" fill="${WHITE}">${esc(title)}</text>`;
     }
 
     const backSvg = Buffer.from(
@@ -215,7 +218,7 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
     const borderRects = items.map((_, i) => {
         const col = i % COLS, row = Math.floor(i / COLS);
         const x = cellX(col) + CARD_PAD, y = cellY(row) + CARD_PAD;
-        return `<rect x="${x + 0.5}" y="${y + 0.5}" width="${CELL_W - 1}" height="${CELL_H - 1}" fill="none" stroke="${BORDER}" stroke-width="1"/>`;
+        return `<rect x="${x + BORDER_W / 2}" y="${y + BORDER_W / 2}" width="${CELL_W - BORDER_W}" height="${CELL_H - BORDER_W}" fill="none" stroke="${BORDER}" stroke-width="${BORDER_W}"/>`;
     });
     const frontSvg = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${borderRects.join('')}</svg>`,
@@ -228,9 +231,13 @@ export async function renderGridImage({ title, iconFile, items }: RenderOpts): P
         ...(iconComposite ? [iconComposite] : []),
     ];
 
+    // JPEG (not PNG) so the 2× image stays well under Discord's 8 MB bot upload
+    // limit — a 2× PNG of this is ~10 MB. 4:4:4 chroma keeps the colored text
+    // and poster borders crisp (default 4:2:0 would smear them).
     return sharp({ create: { width, height, channels: 4, background: BG } })
         .composite(composites)
-        .png()
+        .flatten({ background: BG })
+        .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
         .toBuffer();
 }
 
@@ -316,7 +323,7 @@ export async function generateWeeklyImages(): Promise<WeeklyImage[]> {
     const out: WeeklyImage[] = [];
     for (const s of specs) {
         const buffer = await renderGridImage(s);
-        out.push({ type: s.type, filename: `${s.type}.png`, buffer });
+        out.push({ type: s.type, filename: `${s.type}.jpg`, buffer });
     }
     return out;
 }
