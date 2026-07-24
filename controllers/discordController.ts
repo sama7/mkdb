@@ -11,6 +11,11 @@ import type { FilmDetailsResponse } from '../types/api.js';
 const POSTER_DIR = path.resolve('images/posters');
 const PLACEHOLDER_PATH = path.resolve('images/placeholder-poster.svg');
 const EMPTY_POSTER_BYTES = 118;   // sentinel: sync writes a ~118-byte empty-stub JPEG when Letterboxd has no poster
+// This bot serves the Metropolis network. film_rankings_history holds a row
+// per network per week, so every ranking lookup has to say which one it wants —
+// without it a film ranked in both networks makes the subqueries ambiguous.
+const NETWORK = 'metro';
+
 const SLUG_RE = /^[a-z0-9-]+$/;
 
 /**
@@ -231,7 +236,7 @@ export const getFilmByRank = async (req: Request<{ rank: string }>, res: Respons
         ------------------------------------------------------------- */
         const query = `
       WITH latest AS (
-        SELECT MAX(week) AS wk FROM film_rankings_history
+        SELECT MAX(week) AS wk FROM film_rankings_history WHERE network = $2
       )
       SELECT
         f.title,
@@ -248,6 +253,7 @@ export const getFilmByRank = async (req: Request<{ rank: string }>, res: Respons
         COUNT(r.rating)       AS rating_count
       FROM films                   f
       JOIN film_rankings_history   frh ON frh.film_id = f.film_id
+                                        AND frh.network = $2
       JOIN latest                  l   ON frh.week    = l.wk
       JOIN ratings                 r   ON r.film_id   = f.film_id
       WHERE frh.ranking = $1
@@ -255,7 +261,7 @@ export const getFilmByRank = async (req: Request<{ rank: string }>, res: Respons
       LIMIT 1;
     `;
 
-        const { rows } = await pool.query(query, [rank]);
+        const { rows } = await pool.query(query, [rank, NETWORK]);
         const film = rows[0];
 
         if (!film) {
@@ -341,7 +347,7 @@ export const filmsByContributor = async (req: Request, res: Response) => {
         }
 
         const { rows } = await pool.query(
-            `WITH latest AS (SELECT MAX(week) AS wk FROM film_rankings_history)
+            `WITH latest AS (SELECT MAX(week) AS wk FROM film_rankings_history WHERE network = $2)
              SELECT
                f.title,
                f.year,
@@ -349,7 +355,8 @@ export const filmsByContributor = async (req: Request, res: Response) => {
                (SELECT frh.ranking
                   FROM film_rankings_history frh
                   JOIN latest l ON frh.week = l.wk
-                 WHERE frh.film_id = f.film_id) AS current_rank,
+                 WHERE frh.film_id = f.film_id
+                   AND frh.network = $2) AS current_rank,
                AVG(r.rating) AS average_rating,
                COUNT(r.rating) AS rating_count
              FROM films f
@@ -359,7 +366,7 @@ export const filmsByContributor = async (req: Request, res: Response) => {
              ORDER BY current_rank ASC NULLS LAST,
                       AVG(r.rating) DESC,
                       f.year DESC NULLS LAST`,
-            [lids],
+            [lids, NETWORK],
         );
 
         return res.json({
@@ -545,13 +552,14 @@ export const getNearMankFilmByRank = async (req: Request<{ rank: string }>, res:
           SELECT frh.ranking
           FROM   film_rankings_history frh
           WHERE  frh.film_id = ranked.film_id
-          AND    frh.week = (SELECT MAX(week) FROM film_rankings_history)
+          AND    frh.network = $2
+          AND    frh.week = (SELECT MAX(week) FROM film_rankings_history WHERE network = $2)
         ) AS current_rank
       FROM ranked
       WHERE ranked.ranking = $1;
     `;
 
-        const { rows } = await pool.query(query, [rank]);
+        const { rows } = await pool.query(query, [rank, NETWORK]);
         if (!rows[0])
             return res.status(404).json({ error: 'Rank not found.' });
 
