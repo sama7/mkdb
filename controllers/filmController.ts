@@ -15,7 +15,7 @@ interface NetworkSpec {
     defaultMinRatings: number;
 }
 
-const NETWORKS: Record<Network, NetworkSpec> = {
+export const NETWORKS: Record<Network, NetworkSpec> = {
     metro: { userFlag: 'is_metro', defaultMinRatings: 10 },
     lank:  { userFlag: 'is_lycan', defaultMinRatings: 5 },
 };

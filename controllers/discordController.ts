@@ -5,17 +5,21 @@ import sharp from 'sharp';
 import type { Request, Response } from 'express';
 import pool from '../db/conn.js';
 import { ensureFontconfig } from '../lib/fontconfig.js';
-import { getFilmDetails } from './filmController.js';
+import { getFilmDetails, getLankFilmDetails, NETWORKS, type Network } from './filmController.js';
 import { apiRequest, paginate } from '../sync/lbx-client.js';
 import type { FilmDetailsResponse } from '../types/api.js';
 
 const POSTER_DIR = path.resolve('images/posters');
 const PLACEHOLDER_PATH = path.resolve('images/placeholder-poster.svg');
 const EMPTY_POSTER_BYTES = 118;   // sentinel: sync writes a ~118-byte empty-stub JPEG when Letterboxd has no poster
-// This bot serves the Metropolis network. film_rankings_history holds a row
-// per network per week, so every ranking lookup has to say which one it wants —
-// without it a film ranked in both networks makes the subqueries ambiguous.
-const NETWORK = 'metro';
+// film_rankings_history holds a row per network per week, so every ranking
+// lookup has to say which one it wants — without it a film ranked in both
+// networks makes the subqueries ambiguous. Each handler below is defined once
+// against a Network and exported twice, mirroring filmController.
+const filmDetailsFor: Record<Network, typeof getFilmDetails> = {
+    metro: getFilmDetails,
+    lank: getLankFilmDetails,
+};
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
@@ -104,7 +108,7 @@ async function searchSlug(rawQuery: string): Promise<string | null> {
  * 2. pick first film result → slug
  * 3. delegate to getFilmDetails(slug)
  * ────────────────────────────────────────────────────────────────────────── */
-export const searchFilm = async (req: Request, res: Response) => {
+async function _searchFilm(req: Request, res: Response, network: Network) {
     const rawQuery = String(req.query.query ?? '');
 
     if (!rawQuery) {
@@ -135,7 +139,7 @@ export const searchFilm = async (req: Request, res: Response) => {
         } as unknown as Response;
 
         try {
-            await getFilmDetails(fakeReq, fakeRes);
+            await filmDetailsFor[network](fakeReq, fakeRes);
         } catch (err) {
             console.log('Error in getFilmDetails:', err);
 
@@ -162,14 +166,14 @@ export const searchFilm = async (req: Request, res: Response) => {
         console.error('Error in /films/search:', err);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
 /**
  * GET /api/discord/films/ratings?query=<title>
  * – Finds a film by Letterboxd API search and returns:
  *   { slug, film, ratings }
  */
-export const searchFilmRatings = async (req: Request, res: Response) => {
+async function _searchFilmRatings(req: Request, res: Response, network: Network) {
     const rawQuery = String(req.query.query ?? '');
 
     if (!rawQuery) {
@@ -195,7 +199,7 @@ export const searchFilmRatings = async (req: Request, res: Response) => {
         } as unknown as Response;
 
         try {
-            await getFilmDetails(fakeReq, fakeRes);
+            await filmDetailsFor[network](fakeReq, fakeRes);
         } catch (err) {
             const notFound =
                 (Number(err.code) === 404) ||
@@ -221,10 +225,13 @@ export const searchFilmRatings = async (req: Request, res: Response) => {
         console.error('Error in /films/ratings:', err);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
 // Get a film by its current MKDb rank (1 – 1000)
-export const getFilmByRank = async (req: Request<{ rank: string }>, res: Response) => {
+async function _getFilmByRank(req: Request<{ rank: string }>, res: Response, network: Network) {
+    // The rating aggregates have to be scoped to the network's own members,
+    // otherwise a Lycan lookup reports the film's Metropolis-wide average.
+    const { userFlag } = NETWORKS[network];
     try {
         const rank = Number(req.params.rank);
 
@@ -260,12 +267,13 @@ export const getFilmByRank = async (req: Request<{ rank: string }>, res: Respons
                                         AND frh.network = $2
       JOIN latest                  l   ON frh.week    = l.wk
       JOIN ratings                 r   ON r.film_id   = f.film_id
+      JOIN users                   u   ON u.user_id   = r.user_id AND u.${userFlag}
       WHERE frh.ranking = $1
       GROUP BY f.film_id, frh.ranking
       LIMIT 1;
     `;
 
-        const { rows } = await pool.query(query, [rank, NETWORK]);
+        const { rows } = await pool.query(query, [rank, network]);
         const film = rows[0];
 
         if (!film) {
@@ -280,7 +288,7 @@ export const getFilmByRank = async (req: Request<{ rank: string }>, res: Respons
         console.error('Error fetching film by rank:', err);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
 function pickContributorPhoto(poster?: PosterSource): string | null {
     const sizes = poster?.sizes;
@@ -316,7 +324,8 @@ function shapeContributor(c: LetterboxdContributor, type: ContributorType) {
  * 3. JOIN against `films` to keep only ones present in MKDb
  * 4. Return contributor info + films sorted by current rank
  */
-export const filmsByContributor = async (req: Request, res: Response) => {
+async function _filmsByContributor(req: Request, res: Response, network: Network) {
+    const { userFlag } = NETWORKS[network];
     const rawQuery = String(req.query.query ?? '');
     const type = String(req.query.type ?? '');
 
@@ -365,12 +374,13 @@ export const filmsByContributor = async (req: Request, res: Response) => {
                COUNT(r.rating) AS rating_count
              FROM films f
              JOIN ratings r ON r.film_id = f.film_id
+             JOIN users u ON u.user_id = r.user_id AND u.${userFlag}
              WHERE f.letterboxd_id = ANY($1::text[])
              GROUP BY f.film_id
              ORDER BY current_rank ASC NULLS LAST,
                       AVG(r.rating) DESC,
                       f.year DESC NULLS LAST`,
-            [lids, NETWORK],
+            [lids, network],
         );
 
         return res.json({
@@ -382,7 +392,7 @@ export const filmsByContributor = async (req: Request, res: Response) => {
         console.error('Error in /films/by-contributor:', err);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
 
 /**
  * Pick a grid shape for `n` posters (1-8) that minimizes empty cells.
@@ -553,7 +563,14 @@ export const getPostersGrid = async (req: Request, res: Response) => {
  * GET  /films/nearmank/:rank   (1 ≤ rank ≤ 100)
  * Top-50 films by highest average ★ (≥ 7 ratings && ≤ 9 ratings)
  */
-export const getNearMankFilmByRank = async (req: Request<{ rank: string }>, res: Response) => {
+async function _getNearMankFilmByRank(req: Request<{ rank: string }>, res: Response, network: Network) {
+    const { userFlag, defaultMinRatings } = NETWORKS[network];
+    // "Near-mank" is the band of films that just miss the ranking cutoff, so it
+    // is defined relative to that cutoff rather than hard-coded: metro's
+    // threshold of 10 gives the original 7-9, and Lycan's 5 gives 2-4. Staying
+    // below the threshold is what keeps already-ranked films out of the pool.
+    const nearMax = defaultMinRatings - 1;
+    const nearMin = Math.max(1, defaultMinRatings - 3);
     const rank = Number(req.params.rank);
     if (!Number.isInteger(rank) || rank < 1 || rank > 100) {
         return res.status(400).json({ error: 'Rank must be between 1 and 100.' });
@@ -579,9 +596,10 @@ export const getNearMankFilmByRank = async (req: Request<{ rank: string }>, res:
                                       COUNT(r.rating) DESC) AS ranking
         FROM   films   f
         JOIN   ratings r ON r.film_id = f.film_id
+        JOIN   users   u ON u.user_id = r.user_id AND u.${userFlag}
         WHERE  f.tmdb LIKE 'https://www.themoviedb.org/movie/%'
         GROUP  BY f.film_id
-        HAVING COUNT(r.rating) BETWEEN 7 AND 9            -- 7 ≤ ratings ≤ 9
+        HAVING COUNT(r.rating) BETWEEN ${nearMin} AND ${nearMax}
       )
       SELECT
         ranked.*,
@@ -596,7 +614,7 @@ export const getNearMankFilmByRank = async (req: Request<{ rank: string }>, res:
       WHERE ranked.ranking = $1;
     `;
 
-        const { rows } = await pool.query(query, [rank, NETWORK]);
+        const { rows } = await pool.query(query, [rank, network]);
         if (!rows[0])
             return res.status(404).json({ error: 'Rank not found.' });
 
@@ -605,4 +623,23 @@ export const getNearMankFilmByRank = async (req: Request<{ rank: string }>, res:
         console.error('Error in getNearMankFilmByRank:', err);
         res.status(500).json({ error: 'Internal Server Error' });
     }
-};
+}
+
+/* ---------------------------------------------------------------------------
+   Per-network exports. The Metropolis bot talks to the unprefixed routes and
+   the Lycan bot to the /lank ones; the handlers above are otherwise identical.
+--------------------------------------------------------------------------- */
+export const searchFilm            = (req: Request, res: Response) => _searchFilm(req, res, 'metro');
+export const getLankSearchFilm     = (req: Request, res: Response) => _searchFilm(req, res, 'lank');
+
+export const searchFilmRatings     = (req: Request, res: Response) => _searchFilmRatings(req, res, 'metro');
+export const getLankSearchFilmRatings = (req: Request, res: Response) => _searchFilmRatings(req, res, 'lank');
+
+export const getFilmByRank         = (req: Request<{ rank: string }>, res: Response) => _getFilmByRank(req, res, 'metro');
+export const getLankFilmByRank     = (req: Request<{ rank: string }>, res: Response) => _getFilmByRank(req, res, 'lank');
+
+export const filmsByContributor    = (req: Request, res: Response) => _filmsByContributor(req, res, 'metro');
+export const getLankFilmsByContributor = (req: Request, res: Response) => _filmsByContributor(req, res, 'lank');
+
+export const getNearMankFilmByRank = (req: Request<{ rank: string }>, res: Response) => _getNearMankFilmByRank(req, res, 'metro');
+export const getLankNearMankFilmByRank = (req: Request<{ rank: string }>, res: Response) => _getNearMankFilmByRank(req, res, 'lank');
