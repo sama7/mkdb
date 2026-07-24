@@ -1,4 +1,5 @@
 import type {
+    AutocompleteInteraction,
     ChatInputCommandInteraction,
     Collection,
     SlashCommandBuilder,
@@ -15,6 +16,8 @@ export type CommandBuilderData =
 export interface MkdbCommand {
     data: CommandBuilderData;
     execute(interaction: ChatInputCommandInteraction): Promise<unknown>;
+    /** Optional — only commands with autocompleted options implement this. */
+    autocomplete?(interaction: AutocompleteInteraction): Promise<unknown>;
 }
 
 export interface MkdbSubCommand {

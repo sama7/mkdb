@@ -59,6 +59,21 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+    // Autocomplete arrives as its own interaction type and must be answered
+    // within 3s, so it's handled before (and separately from) command dispatch.
+    if (interaction.isAutocomplete()) {
+        const handler = interaction.client.commands.get(interaction.commandName);
+        if (!handler?.autocomplete) return;
+        try {
+            await handler.autocomplete(interaction);
+        } catch (err) {
+            console.error('[autocomplete]', err);
+            // Responding with an empty list beats leaving the client spinning.
+            if (!interaction.responded) await interaction.respond([]).catch(() => { });
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const groupName = interaction.commandName;

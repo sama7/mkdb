@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, type AutocompleteInteraction, type ChatInputCommandInteraction } from 'discord.js';
 
 import type { MkdbCommand, MkdbSubCommand } from '../types.js';
 import searchCmd from './search.js';
@@ -7,6 +7,8 @@ import randomCmd from './random.js';
 import ratingsCmd from './ratings.js';
 import directorCmd from './director.js';
 import actorCmd from './actor.js';
+import topCmd, { DEFAULT_COUNT, MAX_COUNT, MIN_COUNT } from './top.js';
+import { buildChoices, getFilterOptions, searchDirectors, type ListField } from './_filters.js';
 
 const handlers: Record<string, MkdbSubCommand> = {
     search: searchCmd,
@@ -15,6 +17,7 @@ const handlers: Record<string, MkdbSubCommand> = {
     ratings: ratingsCmd,
     director: directorCmd,
     actor: actorCmd,
+    top: topCmd,
 };
 
 const data = new SlashCommandBuilder()
@@ -76,10 +79,75 @@ const data = new SlashCommandBuilder()
             .addStringOption((o) =>
                 o.setName('query').setDescription("Actor's name").setRequired(true),
             ),
+    )
+    // /mkdb top [count] [filters…]
+    // Every list filter takes a comma-separated string where a leading `-`
+    // excludes, e.g. `countries: japan, -usa`. All options are autocompleted.
+    .addSubcommand((sc) =>
+        sc.setName('top')
+            .setDescription(`Top ranked films (default ${DEFAULT_COUNT}), with optional filters`)
+            .addIntegerOption((o) =>
+                o.setName('count')
+                    .setDescription(`How many films (${MIN_COUNT}-${MAX_COUNT}, default ${DEFAULT_COUNT})`)
+                    .setMinValue(MIN_COUNT).setMaxValue(MAX_COUNT).setRequired(false),
+            )
+            .addStringOption((o) =>
+                o.setName('genres')
+                    .setDescription('e.g. drama, -comedy  (comma-separated; "-" excludes)')
+                    .setAutocomplete(true).setRequired(false),
+            )
+            .addStringOption((o) =>
+                o.setName('directors')
+                    .setDescription('e.g. kurosawa, -spielberg  (comma-separated; "-" excludes)')
+                    .setAutocomplete(true).setRequired(false),
+            )
+            .addStringOption((o) =>
+                o.setName('countries')
+                    .setDescription('e.g. japan, -usa  (comma-separated; "-" excludes)')
+                    .setAutocomplete(true).setRequired(false),
+            )
+            .addStringOption((o) =>
+                o.setName('languages')
+                    .setDescription('e.g. french, -english  (comma-separated; "-" excludes)')
+                    .setAutocomplete(true).setRequired(false),
+            )
+            .addIntegerOption((o) => o.setName('min_year').setDescription('Earliest release year').setRequired(false))
+            .addIntegerOption((o) => o.setName('max_year').setDescription('Latest release year').setRequired(false))
+            .addIntegerOption((o) => o.setName('min_runtime').setDescription('Minimum runtime in minutes').setMinValue(0).setRequired(false))
+            .addIntegerOption((o) => o.setName('max_runtime').setDescription('Maximum runtime in minutes').setMinValue(0).setRequired(false))
+            .addIntegerOption((o) => o.setName('min_ratings').setDescription('Minimum rating count (defaults to 10)').setMinValue(0).setRequired(false))
+            .addIntegerOption((o) => o.setName('max_ratings').setDescription('Maximum rating count').setMinValue(0).setRequired(false)),
     );
 
 const command: MkdbCommand = {
     data,
+
+    /**
+     * Autocomplete for the `/mkdb top` filter options. Only the segment the
+     * user is currently typing gets completed; the choice carries the whole
+     * rebuilt string so picking one appends to the list rather than replacing
+     * it (Discord otherwise overwrites the entire option value).
+     */
+    async autocomplete(interaction: AutocompleteInteraction) {
+        const focused = interaction.options.getFocused(true);
+        const current = focused.value ?? '';
+
+        if (focused.name === 'directors') {
+            // ~29k directors — always query the API for the typed segment. The
+            // results come back ranked by film count, so keep that order.
+            const lastComma = current.lastIndexOf(',');
+            const segment = (lastComma === -1 ? current : current.slice(lastComma + 1)).trim();
+            const term = segment.replace(/^[-!]/, '').trim();
+            const candidates = await searchDirectors(term, 25);
+            await interaction.respond(buildChoices(current, candidates, { preserveOrder: true }));
+            return;
+        }
+
+        const options = await getFilterOptions();
+        const candidates = options[focused.name as ListField] ?? [];
+        await interaction.respond(buildChoices(current, candidates));
+    },
+
     async execute(interaction: ChatInputCommandInteraction) {
         const sub = interaction.options.getSubcommand();
         const handler = handlers[sub];

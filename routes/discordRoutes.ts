@@ -1,5 +1,6 @@
 import * as express from 'express';
 import * as discordController from '../controllers/discordController.js';
+import * as filmController from '../controllers/filmController.js';
 
 const router = express.Router();
 
@@ -20,5 +21,17 @@ router.get('/films/by-contributor', discordController.filmsByContributor);
 
 // GET /api/discord/posters-grid?slugs=a,b,... - Composite poster grid for embeds
 router.get('/posters-grid', discordController.getPostersGrid);
+
+// The `/mkdb top` bot command reuses the site's ranking query verbatim, so it
+// supports exactly the same filters as the web UI. Exposed under /api/discord
+// so the bot keeps talking to a single base URL (MKDB_API_BASE_URL).
+// GET /api/discord/top?limit=&filters={…}
+router.get('/top', filmController.getFilmRankings);
+
+// Sources for the bot's filter autocomplete.
+// GET /api/discord/filter-options       - distinct genres / countries / languages
+// GET /api/discord/directors/search?query=… - director type-ahead
+router.get('/filter-options', filmController.getFilterOptions);
+router.get('/directors/search', filmController.searchDirectors);
 
 export default router;
