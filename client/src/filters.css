@@ -1,0 +1,384 @@
+/* ===========================================================================
+   Filter panel — release year / rating count / runtime ranges plus tri-state
+   multi-selects for genre, director, country and language.
+   Dark theme matching the site (#242424 body), responsive from 320px up.
+   =========================================================================== */
+
+/* The global stylesheet puts a heavy blue `-webkit-focus-ring-color` outline on
+   every button; scope a subtler on-brand ring to this panel instead. */
+.filters-panel button:focus { outline: none; }
+.filters-panel button:focus-visible {
+  outline: 2px solid var(--f-include);
+  outline-offset: 2px;
+}
+
+.filters-panel {
+  --f-bg: #1b1b1b;
+  --f-bg-raised: #232323;
+  --f-border: rgba(255, 255, 255, 0.10);
+  --f-border-strong: rgba(255, 255, 255, 0.22);
+  --f-text: rgba(255, 255, 255, 0.90);
+  --f-muted: rgba(255, 255, 255, 0.50);
+  --f-include: #08c434;
+  --f-exclude: #ff5d5d;
+  --f-radius: 10px;
+
+  max-width: 1100px;
+  margin: 0 auto 1.25rem;
+  padding: 0 0.75rem;
+  text-align: left;
+}
+
+/* ---------- header ---------- */
+.filters-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.filters-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45em 0.9em;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--f-text);
+  background: var(--f-bg);
+  border: 1px solid var(--f-border);
+  border-radius: var(--f-radius);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.filters-toggle:hover { border-color: var(--f-border-strong); background: var(--f-bg-raised); }
+.filters-toggle-icon { font-size: 0.6em; color: var(--f-muted); }
+
+.filters-badge {
+  min-width: 1.35em;
+  padding: 0.1em 0.45em;
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  color: #06220f;
+  background: var(--f-include);
+  border-radius: 999px;
+}
+
+.filters-reset {
+  padding: 0.35em 0.7em;
+  font-size: 0.85rem;
+  color: var(--f-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+.filters-reset:hover { color: var(--f-exclude); border-color: rgba(255, 93, 93, 0.4); }
+
+/* ---------- body ---------- */
+.filters-body {
+  padding: 1rem;
+  background: var(--f-bg);
+  border: 1px solid var(--f-border);
+  border-radius: var(--f-radius);
+}
+
+/* Two deliberate rows: the three numeric ranges, then the four multi-selects.
+   Keeping them in separate grids avoids a ragged wrap at odd viewport widths. */
+.filters-grid {
+  display: grid;
+  gap: 0.9rem 1rem;
+}
+.filters-grid.ranges { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.filters-grid.selects { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0.9rem; }
+
+.filter-field { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+
+.filter-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--f-muted);
+}
+
+/* ---------- numeric ranges ---------- */
+.range-inputs { display: flex; align-items: center; gap: 0.4rem; }
+
+.range-inputs input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  padding: 0.5em 0.6em;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--f-text);
+  background: #141414;
+  border: 1px solid var(--f-border);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.range-inputs input::placeholder { color: rgba(255, 255, 255, 0.32); }
+.range-inputs input:focus {
+  border-color: var(--f-include);
+  box-shadow: 0 0 0 2px rgba(8, 196, 52, 0.18);
+}
+/* strip the number spinners — the arrows crowd these narrow inputs */
+.range-inputs input::-webkit-outer-spin-button,
+.range-inputs input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.range-inputs input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+
+.range-sep { flex: 0 0 auto; color: var(--f-muted); font-size: 0.9rem; }
+
+/* Helper text under a field (e.g. the implicit minimum rating count). */
+.filter-hint {
+  font-size: 0.74rem;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+/* ---------- multi-select ---------- */
+.ms-filter { position: relative; }
+
+.ms-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5em 0.7em;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--f-text);
+  background: #141414;
+  border: 1px solid var(--f-border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.ms-trigger:hover { border-color: var(--f-border-strong); }
+.ms-trigger.is-open { border-color: var(--f-include); box-shadow: 0 0 0 2px rgba(8, 196, 52, 0.18); }
+.ms-trigger.has-selection { border-color: rgba(8, 196, 52, 0.55); }
+.ms-trigger-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-caret { flex: 0 0 auto; font-size: 0.6em; color: var(--f-muted); }
+
+.ms-count {
+  flex: 0 0 auto;
+  min-width: 1.3em;
+  padding: 0.05em 0.4em;
+  font-size: 0.75em;
+  font-weight: 700;
+  text-align: center;
+  color: #06220f;
+  background: var(--f-include);
+  border-radius: 999px;
+}
+
+.ms-panel {
+  position: absolute;
+  z-index: 300;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  min-width: 230px;
+  background: var(--f-bg-raised);
+  border: 1px solid var(--f-border-strong);
+  border-radius: var(--f-radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.ms-search { position: relative; padding: 0.6rem 0.6rem 0.4rem; }
+.ms-search input {
+  width: 100%;
+  padding: 0.45em 1.8em 0.45em 0.6em;
+  font-size: 0.88rem;
+  font-family: inherit;
+  color: var(--f-text);
+  background: #141414;
+  border: 1px solid var(--f-border);
+  border-radius: 7px;
+  outline: none;
+}
+.ms-search input:focus { border-color: var(--f-include); }
+.ms-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 1rem;
+  transform: translateY(-30%);
+  padding: 0 0.25em;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--f-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.ms-search-clear:hover { color: var(--f-text); }
+
+.ms-hint {
+  padding: 0 0.75rem 0.5rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.38);
+  border-bottom: 1px solid var(--f-border);
+}
+
+.ms-list {
+  max-height: 260px;
+  margin: 0;
+  padding: 0.3rem;
+  overflow-y: auto;
+  list-style: none;
+  overscroll-behavior: contain;
+}
+
+.ms-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45em 0.55em;
+  font-size: 0.88rem;
+  color: var(--f-text);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.ms-option:hover { background: rgba(255, 255, 255, 0.07); }
+.ms-option.include { background: rgba(8, 196, 52, 0.12); }
+.ms-option.exclude { background: rgba(255, 93, 93, 0.12); }
+/* Wrap to a second line rather than hard-truncating — director names like
+   "John Carroll Lynch" shouldn't become "John Carroll L…". Clamped at two
+   lines so a stray long value can't stretch the row indefinitely. */
+.ms-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.ms-option-count { flex: 0 0 auto; font-size: 0.76em; color: var(--f-muted); font-variant-numeric: tabular-nums; }
+
+/* include / exclude marker */
+.ms-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+  height: 1.15em;
+  font-size: 0.8em;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid var(--f-border-strong);
+  border-radius: 5px;
+}
+.ms-mark.include { color: #06220f; background: var(--f-include); border-color: var(--f-include); }
+.ms-mark.exclude { color: #2a0808; background: var(--f-exclude); border-color: var(--f-exclude); }
+
+.ms-empty { padding: 0.9em 0.6em; font-size: 0.85rem; color: var(--f-muted); text-align: center; }
+
+/* ---------- actions ---------- */
+.filters-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--f-border);
+}
+
+.filters-apply {
+  padding: 0.55em 1.4em;
+  font-size: 0.92rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.55);
+  background: #141414;
+  border: 1px solid var(--f-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.filters-apply.is-dirty {
+  color: #06220f;
+  background: var(--f-include);
+  border-color: var(--f-include);
+}
+.filters-apply.is-dirty:hover { filter: brightness(1.08); }
+
+.filters-dirty-note { font-size: 0.8rem; color: var(--f-include); }
+
+/* ---------- applied chips ---------- */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.3em 0.55em;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: var(--f-text);
+  background: var(--f-bg-raised);
+  border: 1px solid var(--f-border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.chip:hover { border-color: var(--f-border-strong); background: #2b2b2b; }
+.chip.include { border-color: rgba(8, 196, 52, 0.5); }
+.chip.exclude { border-color: rgba(255, 93, 93, 0.5); }
+.chip-mode { font-weight: 700; line-height: 1; }
+.chip.include .chip-mode { color: var(--f-include); }
+.chip.exclude .chip-mode { color: var(--f-exclude); }
+.chip-x { color: var(--f-muted); font-size: 1.05em; line-height: 1; }
+.chip:hover .chip-x { color: var(--f-text); }
+
+/* ---------- responsive ---------- */
+/* Tablet: ranges stay 3-up, selects drop to 2-up. */
+@media (max-width: 900px) {
+  .filters-grid.selects { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 767px) {
+  .filters-panel { padding: 0 0.6rem; }
+  .filters-body { padding: 0.8rem; }
+  .filters-grid { gap: 0.7rem; }
+  .filters-grid.ranges { grid-template-columns: 1fr; }
+  .filters-grid.selects { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0.7rem; }
+  .filters-actions { margin-top: 0.8rem; padding-top: 0.7rem; }
+  .filters-apply { flex: 1 1 auto; }
+
+  /* The dropdown is an overlay, so it doesn't have to live inside its
+     half-width grid cell — let it use nearly the full viewport so long
+     values (director names especially) aren't needlessly cramped. */
+  .ms-panel {
+    width: min(calc(100vw - 1.7rem), 380px);
+    min-width: 0;
+  }
+  /* Right-hand column: anchor to the right edge, otherwise the wider panel
+     would spill off-screen. */
+  .filters-grid.selects .filter-field:nth-child(even) .ms-panel {
+    left: auto;
+    right: 0;
+  }
+}
+
+/* Only go single-column on very narrow screens — 2-up keeps the panel from
+   becoming a long scroll on a normal phone. */
+@media (max-width: 359px) {
+  .filters-grid.selects { grid-template-columns: 1fr; }
+}

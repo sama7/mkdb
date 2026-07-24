@@ -46,6 +46,12 @@ router.get('/neighbors-differ/:username_a/:username_b', filmController.getNeighb
 // GET /api/evil-mank - Bottom-ranked films (metro-only)
 router.get('/evil-mank', filmController.getEvilMankFilmRankings);
 
+// GET /api/filter-options - distinct genres/countries/languages for the filter UI
+router.get('/filter-options', filmController.getFilterOptions);
+
+// GET /api/directors/search?query=… - type-ahead for the director filter (~29k distinct)
+router.get('/directors/search', filmController.searchDirectors);
+
 // =============================================================================
 // Lank (lycandb subset) routes — same shape as the metro routes above, but
 // the underlying queries filter to users.is_lycan and film_rankings_history /

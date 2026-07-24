@@ -3,7 +3,13 @@ export type PgCount = string;
 export type Genre = string;
 
 export type GenreFilterMode = 'include' | 'exclude';
-export type GenreFilters = Record<string, GenreFilterMode>;
+/** Tri-state multi-select: a value is either included, excluded, or absent. */
+export type MultiSelectFilters = Record<string, GenreFilterMode>;
+export type GenreFilters = MultiSelectFilters;
+
+/** The `films` array columns that support include/exclude multi-select. */
+export const ARRAY_FILTER_FIELDS = ['genres', 'directors', 'countries', 'languages'] as const;
+export type ArrayFilterField = (typeof ARRAY_FILTER_FIELDS)[number];
 
 export interface RankingFilters {
   page?: string | number;
@@ -11,8 +17,20 @@ export interface RankingFilters {
   maxYear?: string | number;
   minRatings?: string | number;
   maxRatings?: string | number;
+  minRuntime?: string | number;
+  maxRuntime?: string | number;
   limit?: string | number;
-  genres?: GenreFilters;
+  genres?: MultiSelectFilters;
+  directors?: MultiSelectFilters;
+  countries?: MultiSelectFilters;
+  languages?: MultiSelectFilters;
+}
+
+/** Distinct values available for the multi-select filters (see /api/filter-options). */
+export interface FilterOptions {
+  countries: string[];
+  languages: string[];
+  genres: string[];
 }
 
 export interface FilmRanking {

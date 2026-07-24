@@ -1,6 +1,6 @@
 import pool from '../db/conn.js';
 import type { Request, Response } from 'express';
-import type { GenreFilters, RankingFilters } from '../types/api.js';
+import { ARRAY_FILTER_FIELDS, type ArrayFilterField, type GenreFilters, type MultiSelectFilters, type RankingFilters } from '../types/api.js';
 
 const MAX_LIMIT = 500;
 type SqlParam = string | number | string[] | boolean;
@@ -34,6 +34,65 @@ function genreEntries(genres: unknown): [string, string][] {
     return Object.entries((genres || {}) as Record<string, string>);
 }
 
+/**
+ * Build the SQL for the include/exclude multi-select filters that operate on
+ * the `films` text[] columns (genres, directors, countries, languages).
+ *
+ * Include is conjunctive (`@>` — the film must have ALL selected values) and
+ * exclude is disjunctive (`NOT &&` — drop the film if it has ANY of them),
+ * matching the behavior the genre filter has always had.
+ *
+ * Pushes onto `conditions`/`params` and returns the next free placeholder
+ * index so callers can keep numbering their own parameters.
+ */
+function buildArrayFilters(
+    filters: RankingFilters,
+    conditions: string[],
+    params: SqlParam[],
+    startIndex: number,
+): number {
+    let paramIndex = startIndex;
+    for (const field of ARRAY_FILTER_FIELDS) {
+        const selections = filters[field as ArrayFilterField] as MultiSelectFilters | undefined;
+        const include: string[] = [];
+        const exclude: string[] = [];
+        genreEntries(selections).forEach(([value, mode]) => {
+            if (mode === 'include') include.push(value);
+            else if (mode === 'exclude') exclude.push(value);
+        });
+        if (include.length > 0) {
+            conditions.push(`f.${field} @> $${paramIndex++}::text[]`);
+            params.push(include);
+        }
+        if (exclude.length > 0) {
+            conditions.push(`NOT (f.${field} && $${paramIndex++}::text[])`);
+            params.push(exclude);
+        }
+    }
+    return paramIndex;
+}
+
+/** Numeric range conditions shared by the ranking endpoints. */
+function buildRangeFilters(
+    ranges: { column: string; min?: string | number; max?: string | number }[],
+    conditions: string[],
+    params: SqlParam[],
+    startIndex: number,
+): number {
+    let paramIndex = startIndex;
+    for (const { column, min, max } of ranges) {
+        if (min !== undefined && min !== '' && min !== null) {
+            conditions.push(`${column} >= $${paramIndex++}`);
+            params.push(min);
+        }
+        if (max !== undefined && max !== '' && max !== null) {
+            conditions.push(`${column} <= $${paramIndex++}`);
+            params.push(max);
+        }
+    }
+    return paramIndex;
+}
+
 // Top film rankings for a given network. The user JOIN filters the ratings
 // pool to that network's members; the rest is the same query for both.
 async function _getFilmRankings(req: Request, res: Response, network: Network) {
@@ -41,15 +100,17 @@ async function _getFilmRankings(req: Request, res: Response, network: Network) {
         const spec = NETWORKS[network];
         const filters = parseRankingFilters(req.query.filters);
 
+        const merged = { ...filters, ...req.query } as RankingFilters;
         const {
             page = 1,
             minYear,
             maxYear,
             minRatings = spec.defaultMinRatings,
             maxRatings,
+            minRuntime,
+            maxRuntime,
             limit: rawLimit,
-            genres = {}
-        } = { ...filters, ...req.query } as RankingFilters;
+        } = merged;
 
         const limit = clampLimit(rawLimit, 100);
         const offset = (Number(page) - 1) * limit;
@@ -90,31 +151,11 @@ async function _getFilmRankings(req: Request, res: Response, network: Network) {
         `;
 
         const conditions: string[] = [];
-
-        if (minYear) {
-            conditions.push(`f.year >= $${paramIndex++}`);
-            queryParams.push(minYear);
-        }
-        if (maxYear) {
-            conditions.push(`f.year <= $${paramIndex++}`);
-            queryParams.push(maxYear);
-        }
-
-        const includeGenres: string[] = [];
-        const excludeGenres: string[] = [];
-        genreEntries(genres).forEach(([genre, mode]) => {
-            if (mode === 'include') includeGenres.push(genre);
-            else if (mode === 'exclude') excludeGenres.push(genre);
-        });
-
-        if (includeGenres.length > 0) {
-            conditions.push(`f.genres @> $${paramIndex++}::text[]`);
-            queryParams.push(includeGenres);
-        }
-        if (excludeGenres.length > 0) {
-            conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
-            queryParams.push(excludeGenres);
-        }
+        paramIndex = buildRangeFilters([
+            { column: 'f.year', min: minYear, max: maxYear },
+            { column: 'f.runtime', min: minRuntime, max: maxRuntime },
+        ], conditions, queryParams, paramIndex);
+        paramIndex = buildArrayFilters(merged, conditions, queryParams, paramIndex);
 
         if (conditions.length > 0) query += ` AND ${conditions.join(' AND ')} `;
 
@@ -157,15 +198,17 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
     try {
         const filters = parseRankingFilters(req.query.filters);
 
+        const merged = { ...filters, ...req.query } as RankingFilters;
         const {
             page = 1,
             minYear,
             maxYear,
             minRatings = 10,
             maxRatings,
+            minRuntime,
+            maxRuntime,
             limit: rawLimit,
-            genres = {}
-        } = { ...filters, ...req.query } as RankingFilters;
+        } = merged;
 
         const limit = clampLimit(rawLimit, 100);
         const offset = (Number(page) - 1) * limit;
@@ -192,23 +235,11 @@ export const getEvilMankFilmRankings = async (req: Request, res: Response) => {
         `;
 
         const conditions: string[] = [];
-        if (minYear) { conditions.push(`f.year >= $${paramIndex++}`); queryParams.push(minYear); }
-        if (maxYear) { conditions.push(`f.year <= $${paramIndex++}`); queryParams.push(maxYear); }
-
-        const includeGenres: string[] = [];
-        const excludeGenres: string[] = [];
-        genreEntries(genres).forEach(([genre, mode]) => {
-            if (mode === 'include') includeGenres.push(genre);
-            else if (mode === 'exclude') excludeGenres.push(genre);
-        });
-        if (includeGenres.length > 0) {
-            conditions.push(`f.genres @> $${paramIndex++}::text[]`);
-            queryParams.push(includeGenres);
-        }
-        if (excludeGenres.length > 0) {
-            conditions.push(`NOT (f.genres && $${paramIndex++}::text[])`);
-            queryParams.push(excludeGenres);
-        }
+        paramIndex = buildRangeFilters([
+            { column: 'f.year', min: minYear, max: maxYear },
+            { column: 'f.runtime', min: minRuntime, max: maxRuntime },
+        ], conditions, queryParams, paramIndex);
+        paramIndex = buildArrayFilters(merged, conditions, queryParams, paramIndex);
         if (conditions.length > 0) query += ` AND ${conditions.join(' AND ')} `;
 
         query += ` GROUP BY f.film_id, f.title, f.year, f.slug, f.genres `;
@@ -637,3 +668,74 @@ async function _getNeighborDifferFilms(req: Request<{ username_a: string; userna
 
 export const getNeighborDifferFilms     = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborDifferFilms(req, res, 'metro');
 export const getLankNeighborDifferFilms = (req: Request<{ username_a: string; username_b: string }>, res: Response) => _getNeighborDifferFilms(req, res, 'lank');
+
+// ---------------------------------------------------------------------------
+// Filter option sources
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/filter-options
+ * Distinct values for the multi-select filters. Genres/countries/languages are
+ * small enough (19 / 223 / 161) to ship as full lists; directors are ~29k, so
+ * they get the search endpoint below instead.
+ *
+ * Values only change after a weekly sync, so the result is cached in-process.
+ */
+interface CachedOptions { data: { genres: string[]; countries: string[]; languages: string[] }; expiresAt: number }
+let filterOptionsCache: CachedOptions | null = null;
+const FILTER_OPTIONS_TTL_MS = 60 * 60 * 1000;   // 1 hour
+
+export const getFilterOptions = async (_req: Request, res: Response) => {
+    try {
+        if (filterOptionsCache && filterOptionsCache.expiresAt > Date.now()) {
+            return res.json(filterOptionsCache.data);
+        }
+        // One pass per column; `> ''` drops NULL/empty entries.
+        const { rows } = await pool.query<{ field: string; values: string[] }>(`
+            SELECT 'genres' AS field, ARRAY(SELECT DISTINCT g FROM films, unnest(genres) g WHERE g > '' ORDER BY g) AS values
+            UNION ALL
+            SELECT 'countries', ARRAY(SELECT DISTINCT c FROM films, unnest(countries) c WHERE c > '' ORDER BY c)
+            UNION ALL
+            SELECT 'languages', ARRAY(SELECT DISTINCT l FROM films, unnest(languages) l WHERE l > '' ORDER BY l)
+        `);
+        const byField = Object.fromEntries(rows.map((r) => [r.field, r.values]));
+        const data = {
+            genres: byField.genres || [],
+            countries: byField.countries || [],
+            languages: byField.languages || [],
+        };
+        filterOptionsCache = { data, expiresAt: Date.now() + FILTER_OPTIONS_TTL_MS };
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching filter options:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
+/**
+ * GET /api/directors/search?query=<text>&limit=<n>
+ * Type-ahead for the director filter. There are ~29k distinct directors, far
+ * too many to ship to the client, so the UI queries this as the user types.
+ * Ordered by film count so the most prolific matches surface first.
+ */
+export const searchDirectors = async (req: Request, res: Response) => {
+    try {
+        const query = String(req.query.query ?? '').trim();
+        const limit = clampLimit(req.query.limit, 20);
+        if (query.length < 2) return res.json([]);
+
+        const { rows } = await pool.query<{ director: string; film_count: string }>(
+            `SELECT d AS director, COUNT(*)::text AS film_count
+               FROM films, unnest(directors) d
+              WHERE d ILIKE '%' || $1 || '%'
+              GROUP BY d
+              ORDER BY COUNT(*) DESC, d ASC
+              LIMIT $2`,
+            [query, limit],
+        );
+        res.json(rows.map((r) => ({ name: r.director, filmCount: Number(r.film_count) })));
+    } catch (error) {
+        console.error('Error searching directors:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+};

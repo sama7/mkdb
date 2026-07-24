@@ -62,7 +62,10 @@ const FilmGridLank = () => {
     }, [filters, page]);
 
     const handleFiltersChange = (newFilters: FiltersState) => {
-        setFilters({ ...filters, ...newFilters });
+        // Replace rather than merge: <Filters> owns the whole filter state and
+        // emits it in full, so merging would resurrect filters the user just
+        // cleared (removed keys are absent, not empty).
+        setFilters(newFilters);
         setPage(1);
     };
 
@@ -74,7 +77,7 @@ const FilmGridLank = () => {
         return (
             <div className="mb-4">
                 <h3 className="my-3">Top Ranked Films</h3>
-                <Filters filters={filters} onFiltersChange={handleFiltersChange} />
+                <Filters filters={filters} onFiltersChange={handleFiltersChange} defaultMinRatings={5} />
                 <Spinner data-bs-theme="dark" animation="border" role="status">
                     <span className="visually-hidden">Loading...</span>
                 </Spinner>
@@ -85,7 +88,7 @@ const FilmGridLank = () => {
     return (
         <div className="mb-4">
             <h3 className="my-3">Top Ranked Films</h3>
-            <Filters filters={filters} onFiltersChange={handleFiltersChange} />
+            <Filters filters={filters} onFiltersChange={handleFiltersChange} defaultMinRatings={5} />
             <div className="film-grid container" style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,

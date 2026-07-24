@@ -1,13 +1,15 @@
 import type {
   Film as ApiFilm,
   FilmRanking,
+  FilterOptions,
   GenreFilters,
   MemberDetails,
+  MultiSelectFilters,
   Rating,
   User,
 } from '../../types/api';
 
-export type { FilmRanking, GenreFilters, MemberDetails, Rating, User };
+export type { FilmRanking, FilterOptions, GenreFilters, MemberDetails, MultiSelectFilters, Rating, User };
 
 export type Film = ApiFilm & {
   slug: string;
@@ -54,8 +56,16 @@ export interface FiltersState {
   maxYear?: string;
   minRatings?: string;
   maxRatings?: string;
-  genres?: GenreFilters;
+  minRuntime?: string;
+  maxRuntime?: string;
+  genres?: MultiSelectFilters;
+  directors?: MultiSelectFilters;
+  countries?: MultiSelectFilters;
+  languages?: MultiSelectFilters;
 }
+
+/** The multi-select filter fields, used to drive the filter UI generically. */
+export type MultiSelectField = 'genres' | 'directors' | 'countries' | 'languages';
 
 export type MemberSort = 'Watched' | 'Name';
 export type NeighborSort = 'Similarity Score' | 'Name';
