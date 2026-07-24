@@ -201,7 +201,7 @@ const Filters = ({ filters, onFiltersChange, defaultMinRatings = 10 }: FiltersPr
                                     blank; say so rather than leaving results silently filtered. */}
                                 {f.min === 'minRatings' && !draft.minRatings && (
                                     <span className="filter-hint">
-                                        Showing films with {defaultMinRatings}+ ratings
+                                        Defaults to {defaultMinRatings}+ ratings
                                     </span>
                                 )}
                             </div>
