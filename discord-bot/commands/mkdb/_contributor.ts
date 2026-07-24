@@ -130,14 +130,21 @@ export async function runContributor(
 
         if (contributor.photo_url) anchor.setThumbnail(contributor.photo_url);
 
-        const slugList = slice.map((f) => f.slug).filter(Boolean).join(',');
+        // Number each tile to match the list above it (1-based across pages).
+        const withSlugs = slice
+            .map((f, i) => ({ slug: f.slug, n: start + i + 1 }))
+            .filter((f) => f.slug);
+        const slugList = withSlugs.map((f) => f.slug).join(',');
+        const labelList = withSlugs.map((f) => String(f.n)).join(',');
         let attachment: AttachmentBuilder | null = null;
         let grid: EmbedBuilder | null = null;
         try {
-            const r = await fetch(`${MKDB_API_BASE}/posters-grid?slugs=${encodeURIComponent(slugList)}`);
+            const r = await fetch(
+                `${MKDB_API_BASE}/posters-grid?slugs=${encodeURIComponent(slugList)}&labels=${encodeURIComponent(labelList)}`,
+            );
             if (r.ok) {
                 const buf = Buffer.from(await r.arrayBuffer());
-                const name = `posters-${page}.png`;
+                const name = `posters-${page}.jpg`;
                 attachment = new AttachmentBuilder(buf, { name });
                 grid = new EmbedBuilder().setImage(`attachment://${name}`);
             }

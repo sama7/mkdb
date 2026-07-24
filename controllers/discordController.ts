@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import sharp from 'sharp';
 import type { Request, Response } from 'express';
 import pool from '../db/conn.js';
+import { ensureFontconfig } from '../lib/fontconfig.js';
 import { getFilmDetails } from './filmController.js';
 import { apiRequest, paginate } from '../sync/lbx-client.js';
 import type { FilmDetailsResponse } from '../types/api.js';
@@ -17,6 +18,9 @@ const EMPTY_POSTER_BYTES = 118;   // sentinel: sync writes a ~118-byte empty-stu
 const NETWORK = 'metro';
 
 const SLUG_RE = /^[a-z0-9-]+$/;
+
+// The poster grid draws numbered labels, which needs the bundled fonts.
+ensureFontconfig();
 
 /**
  * Return the on-disk file path sharp should read for a given slug's poster:
@@ -422,46 +426,78 @@ export const getPostersGrid = async (req: Request, res: Response) => {
     const slugs = raw.split(',').filter((s) => SLUG_RE.test(s)).slice(0, 8);
     if (slugs.length === 0) return res.status(400).json({ error: 'slugs required' });
 
-    const CELL_W = 230, CELL_H = 345;
-    const GAP = 6;
-    const BLACK = { r: 0, g: 0, b: 0 };
-    const FRAME_COLOR = '#242424';   // matches mkdb.co body background (client/src/index.css)
+    // Optional numbered labels, one per slug (e.g. "1,2,3" or MKDb ranks).
+    // When supplied each poster is drawn as a card with the number beneath it,
+    // matching the weekly #mank images so readers can map a row in the text
+    // list to a tile in the grid. Omitted → bare posters, as before.
+    const labelsRaw = String(req.query.labels ?? '');
+    const labels = labelsRaw
+        ? labelsRaw.split(',').map((l) => l.trim().slice(0, 8))
+        : [];
+    const showLabels = labels.length > 0;
+
+    const SCALE = 2;                       // crisper on high-DPI; see weekly-images
+    const CELL_W = 230 * SCALE, CELL_H = 345 * SCALE;
+    const GAP = 12 * SCALE;
+    const CARD_PAD = showLabels ? 10 * SCALE : 6 * SCALE;
+    // Full height of the strip between the poster's bottom edge and the card's
+    // — the label's own padding is part of it, so the number can be centered in
+    // it directly (same arrangement as the weekly images).
+    const LABEL_H = showLabels ? 52 * SCALE : 0;
+    const OUTER = 12 * SCALE;
+    const RADIUS = 6 * SCALE;
+    const BORDER_W = Math.max(1, SCALE);
+    const CARD_W = CELL_W + CARD_PAD * 2;
+    const CARD_H = CELL_H + CARD_PAD + (showLabels ? LABEL_H : CARD_PAD);
+
+    const BG = '#242424';                  // matches mkdb.co body background
+    const CARD_BG = '#141414';
+    const BORDER = 'rgba(255,255,255,0.14)';
+    const TEXT = 'rgba(255,255,255,0.92)';
+    const FONT = 'Roboto';
+    const LABEL_FONT_SIZE = 26 * SCALE;
 
     const { cols, rows, rowCounts } = gridLayout(slugs.length);
-    const W = cols * CELL_W + (cols + 1) * GAP;
-    const H = rows * CELL_H + (rows + 1) * GAP;
+    const W = OUTER * 2 + cols * CARD_W + (cols - 1) * GAP;
+    const H = OUTER * 2 + rows * CARD_H + (rows - 1) * GAP;
 
-    // Per-row geometry. `contentLeft` is where this row's tile strip starts
-    // after centering; rows shorter than `cols` get pushed inward so their
-    // left/right margins are exposed (and stay black).
-    const rowGeometry = rowCounts.map((rowCount, row) => {
-        const contentW = rowCount * CELL_W + (rowCount - 1) * GAP;
-        const contentLeft = (W - contentW) / 2;
-        return { row, rowCount, contentLeft, contentW };
+    // Rows shorter than the widest row are centered, so a partial final row
+    // (n=5, n=7) sits balanced rather than hugging the left edge.
+    const slots: { x: number; y: number }[] = [];
+    rowCounts.forEach((rowCount, row) => {
+        const contentW = rowCount * CARD_W + (rowCount - 1) * GAP;
+        const left = (W - contentW) / 2;
+        for (let col = 0; col < rowCount; col++) {
+            slots.push({
+                x: Math.round(left + col * (CARD_W + GAP)),
+                y: Math.round(OUTER + row * (CARD_H + GAP)),
+            });
+        }
     });
 
-    // One SVG with a gray rect per row, each rect = row's tile strip plus a
-    // 6px frame on every side. Sharp composites this over the black canvas
-    // before the actual poster tiles.
-    const frameRects = rowGeometry.map(({ row, contentLeft, contentW }) => {
-        const x = contentLeft - GAP;
-        const y = row * (CELL_H + GAP);
-        const w = contentW + 2 * GAP;
-        const h = CELL_H + 2 * GAP;
-        return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${FRAME_COLOR}"/>`;
-    }).join('');
-    const frameSvg = Buffer.from(
-        `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${frameRects}</svg>`,
-    );
-
-    // Flatten (rowIdx, colIdx, contentLeft) for every poster slot so we can
-    // map a slug index to its pixel position in one step.
-    const slots: { row: number; col: number; contentLeft: number }[] = [];
-    rowGeometry.forEach(({ row, rowCount, contentLeft }) => {
-        for (let col = 0; col < rowCount; col++) slots.push({ row, col, contentLeft });
-    });
+    const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     try {
+        // Background layer: card panels plus the number under each poster.
+        const cardParts = slots.slice(0, slugs.length).map(({ x, y }, i) => {
+            const rect = `<rect x="${x}" y="${y}" width="${CARD_W}" height="${CARD_H}" rx="${RADIUS}" fill="${CARD_BG}"/>`;
+            if (!showLabels) return rect;
+            const label = labels[i] ?? String(i + 1);
+            const cx = x + CARD_W / 2;
+            // Center the digits in the strip: put the *cap* midpoint on the
+            // strip's midpoint, which means dropping the baseline by half a cap
+            // height (Roboto's cap height is 0.711em, and digits are cap-tall).
+            const baseline = y + CARD_PAD + CELL_H + LABEL_H / 2 + LABEL_FONT_SIZE * 0.711 / 2;
+            return rect +
+                `<text x="${cx}" y="${baseline}" text-anchor="middle" font-family="${FONT}" ` +
+                `font-size="${LABEL_FONT_SIZE}" font-weight="600" fill="${TEXT}">${esc(label)}</text>`;
+        }).join('');
+
+        const backSvg = Buffer.from(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
+            `<rect width="${W}" height="${H}" fill="${BG}"/>${cardParts}</svg>`,
+        );
+
         const tiles = await Promise.all(
             slugs.map(async (slug, i) => {
                 try {
@@ -472,12 +508,8 @@ export const getPostersGrid = async (req: Request, res: Response) => {
                     const buf = await sharp(file)
                         .resize(CELL_W, CELL_H, { fit: 'cover' })
                         .toBuffer();
-                    const { row, col, contentLeft } = slots[i];
-                    return {
-                        input: buf,
-                        left: Math.round(contentLeft + col * (CELL_W + GAP)),
-                        top: GAP + row * (CELL_H + GAP),
-                    };
+                    const { x, y } = slots[i];
+                    return { input: buf, left: x + CARD_PAD, top: y + CARD_PAD };
                 } catch {
                     return null;
                 }
@@ -485,25 +517,30 @@ export const getPostersGrid = async (req: Request, res: Response) => {
         );
         const overlays = tiles.filter((tile): tile is NonNullable<typeof tile> => Boolean(tile));
 
+        // Thin frame drawn over the poster edges, matching the site's .film-poster.
+        const borders = slots.slice(0, slugs.length).map(({ x, y }) =>
+            `<rect x="${x + CARD_PAD + BORDER_W / 2}" y="${y + CARD_PAD + BORDER_W / 2}" ` +
+            `width="${CELL_W - BORDER_W}" height="${CELL_H - BORDER_W}" fill="none" ` +
+            `stroke="${BORDER}" stroke-width="${BORDER_W}"/>`).join('');
+        const frontSvg = Buffer.from(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${borders}</svg>`,
+        );
+
         const out = await sharp({
-            create: {
-                width: W,
-                height: H,
-                channels: 3,
-                background: BLACK,
-            },
+            create: { width: W, height: H, channels: 4, background: BG },
         })
             .composite([
-                { input: frameSvg, left: 0, top: 0 },
+                { input: backSvg, left: 0, top: 0 },
                 ...overlays,
+                { input: frontSvg, left: 0, top: 0 },
             ])
-            // PNG (not JPEG) so the flat-color frame and centering margins stay
-            // exact — JPEG chroma subsampling drifts those by a few RGB points
-            // and shows up as visible color noise around the posters.
-            .png()
+            .flatten({ background: BG })
+            // JPEG keeps the 2x image well under Discord's upload limit; 4:4:4
+            // chroma preserves the crisp number labels and poster borders.
+            .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
             .toBuffer();
 
-        res.set('Content-Type', 'image/png');
+        res.set('Content-Type', 'image/jpeg');
         res.set('Cache-Control', 'public, max-age=86400');
         return res.send(out);
     } catch (err) {

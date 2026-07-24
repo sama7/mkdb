@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import pool from '../db/conn.js';
+import { ensureFontconfig } from '../lib/fontconfig.js';
 
 const POSTER_DIR = process.env.WEEKLY_POSTER_DIR || path.resolve('images/posters');
 const PLACEHOLDER_PATH = path.resolve('images/placeholder-poster.svg');
@@ -23,25 +24,6 @@ const ICON_DIR = path.resolve('images/icons');
 const FONT_DIR = path.resolve('assets/fonts');
 const EMPTY_POSTER_BYTES = 118;
 
-// sharp/librsvg renders SVG text via fontconfig. The VPS has no system fonts,
-// so we point fontconfig at the bundled Roboto (assets/fonts) via a generated
-// config. Isolating to just the bundled font guarantees identical rendering
-// on any host (local dev and prod). Set before the first sharp text render.
-function ensureFontconfig(): void {
-    if (process.env.MKDB_FONTCONFIG_READY) return;
-    const cacheDir = path.join(os.tmpdir(), 'mkdb-fontcache');
-    fs.mkdirSync(cacheDir, { recursive: true });
-    const conf = `<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-  <dir>${FONT_DIR}</dir>
-  <cachedir>${cacheDir}</cachedir>
-</fontconfig>`;
-    const confPath = path.join(os.tmpdir(), 'mkdb-fonts.conf');
-    fs.writeFileSync(confPath, conf);
-    process.env.FONTCONFIG_FILE = confPath;
-    process.env.MKDB_FONTCONFIG_READY = '1';
-}
 ensureFontconfig();
 
 // Overall resolution multiplier. Source posters are 300×450, so the base
