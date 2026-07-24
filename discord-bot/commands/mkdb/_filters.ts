@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 /**
- * Parsing + autocomplete support for the filter options on `/mkdb top`.
+ * Parsing + autocomplete support for the filter options on `top`.
  *
  * Syntax (per option): a comma-separated list of values, each optionally
  * prefixed with `-` (or `!`) to exclude rather than include.
@@ -17,7 +17,6 @@ import 'dotenv/config';
  * "United states" both land on "USA" — so users don't have to match casing.
  */
 
-const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
 
 export type FilterMode = 'include' | 'exclude';
 export type MultiSelectFilters = Record<string, FilterMode>;
@@ -89,30 +88,34 @@ export function resolveAgainstList(input: string | null, options: string[]): Res
 
 interface FilterOptions { genres: string[]; countries: string[]; languages: string[] }
 
-let optionsCache: { data: FilterOptions; expiresAt: number } | null = null;
+// Keyed by API base so each network caches its own copy. The vocabularies
+// come from the shared `films` table and so are currently identical, but
+// nothing here depends on that staying true.
+const optionsCache = new Map<string, { data: FilterOptions; expiresAt: number }>();
 const OPTIONS_TTL_MS = 30 * 60 * 1000;
 
 /** Genres/countries/languages, cached — they only change on a weekly sync. */
-export async function getFilterOptions(): Promise<FilterOptions> {
-    if (optionsCache && optionsCache.expiresAt > Date.now()) return optionsCache.data;
+export async function getFilterOptions(apiBase: string): Promise<FilterOptions> {
+    const cached = optionsCache.get(apiBase);
+    if (cached && cached.expiresAt > Date.now()) return cached.data;
     try {
-        const res = await fetch(`${MKDB_API_BASE}/filter-options`);
+        const res = await fetch(`${apiBase}/filter-options`);
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data = (await res.json()) as FilterOptions;
-        optionsCache = { data, expiresAt: Date.now() + OPTIONS_TTL_MS };
+        optionsCache.set(apiBase, { data, expiresAt: Date.now() + OPTIONS_TTL_MS });
         return data;
     } catch (err) {
         console.warn('[filters] filter-options fetch failed:', (err as Error).message);
-        return optionsCache?.data ?? { genres: [], countries: [], languages: [] };
+        return cached?.data ?? { genres: [], countries: [], languages: [] };
     }
 }
 
 /** Director type-ahead — ~29k distinct names, so this always hits the API. */
-export async function searchDirectors(query: string, limit = 25): Promise<string[]> {
+export async function searchDirectors(apiBase: string, query: string, limit = 25): Promise<string[]> {
     if (query.trim().length < 2) return [];
     try {
         const res = await fetch(
-            `${MKDB_API_BASE}/directors/search?query=${encodeURIComponent(query.trim())}&limit=${limit}`,
+            `${apiBase}/directors/search?query=${encodeURIComponent(query.trim())}&limit=${limit}`,
         );
         if (!res.ok) return [];
         const rows = (await res.json()) as { name: string }[];
@@ -123,13 +126,13 @@ export async function searchDirectors(query: string, limit = 25): Promise<string
 }
 
 /** Resolve the free-text `directors:` option to canonical director names. */
-export async function resolveDirectors(input: string | null): Promise<ResolveResult> {
+export async function resolveDirectors(apiBase: string, input: string | null): Promise<ResolveResult> {
     const filters: MultiSelectFilters = {};
     const unknown: string[] = [];
     if (!input) return { filters, unknown };
 
     for (const token of tokenize(input)) {
-        const matches = await searchDirectors(token.term, 5);
+        const matches = await searchDirectors(apiBase, token.term, 5);
         const best = resolveValue(token.term, matches) ?? matches[0] ?? null;
         if (best) filters[best] = token.mode;
         else unknown.push(token.raw);

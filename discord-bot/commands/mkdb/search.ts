@@ -6,11 +6,10 @@ import {
 } from 'discord.js';
 
 import type { MkdbSubCommand } from '../types.js';
+import type { Brand } from './_brand.js';
 import { formatRuntime, truncateSynopsis } from './_format.js';
 import { fetchThumbAttachment } from './_thumbnail.js';
 
-const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
-const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
 interface FilmPayload {
     title: string;
@@ -35,12 +34,12 @@ interface SearchPayload {
 }
 
 const subcommand: MkdbSubCommand = {
-    async execute(interaction: ChatInputCommandInteraction) {
+    async execute(interaction: ChatInputCommandInteraction, brand: Brand) {
         await interaction.deferReply();
         const query = interaction.options.getString('query', true);
 
         const res = await fetch(
-            `${MKDB_API_BASE}/films/search?query=${encodeURIComponent(query)}`,
+            `${brand.apiBase}/films/search?query=${encodeURIComponent(query)}`,
         );
 
         // Try to parse JSON even when the status is not 200
@@ -57,11 +56,11 @@ const subcommand: MkdbSubCommand = {
             }
             if (payload?.code === 'NOT_ON_MKDB') {
                 return interaction.editReply(
-                    `We found a film, but it's not on MKDb. That means none of us have rated it yet. ` +
+                    `We found a film, but it's not on ${brand.label}. That means none of us have rated it yet. ` +
                     `Please try sending the command: \`!f ${query}\``,
                 );
             }
-            console.log('MKDb search error:', payload);
+            console.log('`${brand.label} search error:`', payload);
             return interaction.editReply('❌  Server error while searching.');
         }
 
@@ -92,14 +91,14 @@ const subcommand: MkdbSubCommand = {
 
         const embed = new EmbedBuilder()
             .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'})`)
-            .setURL(`${MKDB_BASE_URL}/film/${slug}`)
+            .setURL(`${brand.siteBase}/film/${slug}`)
             .setDescription(descParts.join('\n') || '—')
             .addFields(
-                { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
+                { name: `${brand.label} Rank`, value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
                 { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
                 { name: 'Rating Count', value: `${film.rating_count}`, inline: true },
             )
-            .setFooter({ text: 'Metropolis Kino Database' });
+            .setFooter({ text: `${brand.community} Kino Database` });
 
         if (thumb) embed.setThumbnail(thumb.thumbnailUrl);
 

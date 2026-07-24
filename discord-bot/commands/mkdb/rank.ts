@@ -6,10 +6,9 @@ import {
 } from 'discord.js';
 
 import type { MkdbSubCommand } from '../types.js';
+import type { Brand } from './_brand.js';
 import { formatRuntime, truncateSynopsis } from './_format.js';
 
-const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
-const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
 interface FilmPayload {
     title: string;
@@ -32,11 +31,11 @@ interface RankPayload {
 }
 
 const subcommand: MkdbSubCommand = {
-    async execute(interaction: ChatInputCommandInteraction) {
+    async execute(interaction: ChatInputCommandInteraction, brand: Brand) {
         await interaction.deferReply();
         const rank = interaction.options.getInteger('number', true);
 
-        const res = await fetch(`${MKDB_API_BASE}/films/rank/${rank}`);
+        const res = await fetch(`${brand.apiBase}/films/rank/${rank}`);
         if (!res.ok) return interaction.editReply('❌  Could not fetch that rank.');
 
         const { film } = (await res.json()) as RankPayload;
@@ -57,15 +56,15 @@ const subcommand: MkdbSubCommand = {
 
         const embed = new EmbedBuilder()
             .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'})`)
-            .setURL(`${MKDB_BASE_URL}/film/${film.slug}`)
+            .setURL(`${brand.siteBase}/film/${film.slug}`)
             .setDescription(descParts.join('\n') || '—')
             .setThumbnail(`https://mkdb.co/images/posters/${film.slug}.jpg`)
             .addFields(
-                { name: 'MKDb Rank', value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
+                { name: `${brand.label} Rank`, value: film.current_rank ? `#${film.current_rank}` : 'N/A', inline: true },
                 { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
                 { name: 'Rating Count', value: `${film.rating_count}`, inline: true },
             )
-            .setFooter({ text: 'Metropolis Kino Database' });
+            .setFooter({ text: `${brand.community} Kino Database` });
 
         return interaction.editReply({ embeds: [embed] });
     },

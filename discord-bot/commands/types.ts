@@ -1,3 +1,4 @@
+import type { Brand } from './mkdb/_brand.js';
 import type {
     AutocompleteInteraction,
     ChatInputCommandInteraction,
@@ -15,13 +16,15 @@ export type CommandBuilderData =
 
 export interface MkdbCommand {
     data: CommandBuilderData;
+    /** Which network/naming this registered copy of the command serves. */
+    brand: Brand;
     execute(interaction: ChatInputCommandInteraction): Promise<unknown>;
     /** Optional — only commands with autocompleted options implement this. */
     autocomplete?(interaction: AutocompleteInteraction): Promise<unknown>;
 }
 
 export interface MkdbSubCommand {
-    execute(interaction: ChatInputCommandInteraction): Promise<unknown>;
+    execute(interaction: ChatInputCommandInteraction, brand: Brand): Promise<unknown>;
 }
 
 // Tells TypeScript about `client.commands`, which we attach manually

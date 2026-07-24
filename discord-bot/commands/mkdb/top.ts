@@ -13,6 +13,7 @@ import {
 } from 'discord.js';
 
 import type { MkdbSubCommand } from '../types.js';
+import type { Brand } from './_brand.js';
 import {
     describeFilters,
     getFilterOptions,
@@ -21,9 +22,6 @@ import {
     resolveDirectors,
     type TopFilters,
 } from './_filters.js';
-
-const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
-const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 
 const PAGE_SIZE = 8;          // matches the poster grid's 4×2 layout
 export const MAX_COUNT = 120;  // 15 pages at 8 per page
@@ -52,7 +50,7 @@ function intOption(interaction: ChatInputCommandInteraction, name: string): numb
 }
 
 const subcommand: MkdbSubCommand = {
-    async execute(interaction: ChatInputCommandInteraction) {
+    async execute(interaction: ChatInputCommandInteraction, brand: Brand) {
         await interaction.deferReply();
 
         const count = Math.min(
@@ -62,11 +60,11 @@ const subcommand: MkdbSubCommand = {
 
         // Resolve the free-text filter options against the real values so
         // "japan, -usa" becomes { Japan: include, USA: exclude }.
-        const options = await getFilterOptions();
+        const options = await getFilterOptions(brand.apiBase);
         const genres = resolveAgainstList(interaction.options.getString('genres'), options.genres);
         const countries = resolveAgainstList(interaction.options.getString('countries'), options.countries);
         const languages = resolveAgainstList(interaction.options.getString('languages'), options.languages);
-        const directors = await resolveDirectors(interaction.options.getString('directors'));
+        const directors = await resolveDirectors(brand.apiBase, interaction.options.getString('directors'));
 
         const unknown = [...genres.unknown, ...countries.unknown, ...languages.unknown, ...directors.unknown];
 
@@ -85,12 +83,12 @@ const subcommand: MkdbSubCommand = {
 
         let films: TopFilm[];
         try {
-            const url = `${MKDB_API_BASE}/top?limit=${count}&filters=${encodeURIComponent(JSON.stringify(filters))}`;
+            const url = `${brand.apiBase}/top?limit=${count}&filters=${encodeURIComponent(JSON.stringify(filters))}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error(`status ${res.status}`);
             films = (await res.json()) as TopFilm[];
         } catch (err) {
-            console.error('MKDb top fetch failed:', err);
+            console.error(`${brand.label} top fetch failed:`, err);
             return interaction.editReply('❌ Server error while fetching the rankings.');
         }
 
@@ -113,22 +111,22 @@ const subcommand: MkdbSubCommand = {
 
             const lines = slice.map((f, i) => {
                 const rank = f.ranking ?? start + i + 1;
-                const titleLink = `[*${escapeMarkdown(f.title)}*](${MKDB_BASE_URL}/film/${f.slug})`;
+                const titleLink = `[*${escapeMarkdown(f.title)}*](${brand.siteBase}/film/${f.slug})`;
                 const yr = f.year ? ` (${f.year})` : '';
                 return `**${rank}.** ${titleLink}${yr} — ${formatStar(f.average_rating)} / ${f.rating_count}`;
             });
 
             const anchor = new EmbedBuilder()
                 .setTitle(`🏆 Top ${films.length} Ranked Film${films.length === 1 ? '' : 's'}`)
-                .setURL(MKDB_BASE_URL)
+                .setURL(brand.siteBase)
                 .setDescription(lines.join('\n'))
-                .setFooter({ text: `Page ${page + 1}/${totalPages} · sorted by MKDb rank` });
+                .setFooter({ text: `Page ${page + 1}/${totalPages} · sorted by ${brand.label} rank` });
 
             if (filterLines.length) {
                 anchor.addFields({ name: 'Filters', value: filterLines.join('\n').slice(0, 1024) });
             }
 
-            // Label each tile with its MKDb rank so the grid lines up with the
+            // Label each tile with its rank so the grid lines up with the
             // numbered list above it.
             const withSlugs = slice
                 .map((f, i) => ({ slug: f.slug, rank: f.ranking ?? start + i + 1 }))
@@ -139,7 +137,7 @@ const subcommand: MkdbSubCommand = {
             let grid: EmbedBuilder | null = null;
             try {
                 const r = await fetch(
-                    `${MKDB_API_BASE}/posters-grid?slugs=${encodeURIComponent(slugList)}&labels=${encodeURIComponent(labelList)}`,
+                    `${brand.apiBase}/posters-grid?slugs=${encodeURIComponent(slugList)}&labels=${encodeURIComponent(labelList)}`,
                 );
                 if (r.ok) {
                     const buf = Buffer.from(await r.arrayBuffer());

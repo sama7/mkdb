@@ -12,8 +12,8 @@ import {
     type ChatInputCommandInteraction,
 } from 'discord.js';
 
-const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
-const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
+import type { Brand } from './_brand.js';
+
 const PAGE_SIZE = 8;
 
 export type ContributorType = 'Director' | 'Actor';
@@ -55,6 +55,7 @@ function rankSuffix(rank: number | null | undefined): string {
 
 export async function runContributor(
     interaction: ChatInputCommandInteraction,
+    brand: Brand,
     type: ContributorType,
     label: ContributorType,
 ): Promise<unknown> {
@@ -64,10 +65,10 @@ export async function runContributor(
     let res: Response;
     try {
         res = await fetch(
-            `${MKDB_API_BASE}/films/by-contributor?query=${encodeURIComponent(query)}&type=${type}`,
+            `${brand.apiBase}/films/by-contributor?query=${encodeURIComponent(query)}&type=${type}`,
         );
     } catch (err) {
-        console.error(`MKDb ${type} fetch failed:`, err);
+        console.error(`${brand.label} ${type} fetch failed:`, err);
         return interaction.editReply('❌ Server error while searching.');
     }
 
@@ -82,7 +83,7 @@ export async function runContributor(
         if (payload?.code === 'NO_CONTRIBUTOR_FOUND') {
             return interaction.editReply(`🔍 No ${label.toLowerCase()} found for \`${query}\`. Please check your spelling.`);
         }
-        console.log(`MKDb ${type} error:`, payload);
+        console.log(`${brand.label} ${type} error:`, payload);
         return interaction.editReply('❌ Server error while searching.');
     }
 
@@ -95,7 +96,7 @@ export async function runContributor(
             .setTitle(escapeMarkdown(contributor.name))
             .setURL(contributor.profile_url || null)
             .setDescription(
-                `No films from this ${label.toLowerCase()} are on MKDb yet.\n` +
+                `No films from this ${label.toLowerCase()} are on ${brand.label} yet.\n` +
                 `Letterboxd lists ${total_letterboxd} ${label.toLowerCase()} credit${total_letterboxd === 1 ? '' : 's'}.`,
             );
         if (contributor.photo_url) embed.setThumbnail(contributor.photo_url);
@@ -113,7 +114,7 @@ export async function runContributor(
 
         const lines = slice.map((f, i) => {
             const n = start + i + 1;
-            const titleLink = `[*${escapeMarkdown(f.title)}*](${MKDB_BASE_URL}/film/${f.slug})`;
+            const titleLink = `[*${escapeMarkdown(f.title)}*](${brand.siteBase}/film/${f.slug})`;
             const yr = f.year ? ` (${f.year})` : '';
             return `**${n}.** ${titleLink}${yr} — ${formatStar(f.average_rating)} / ${f.rating_count}${rankSuffix(f.current_rank)}`;
         });
@@ -123,10 +124,10 @@ export async function runContributor(
             .setURL(contributor.profile_url || null)
             .setDescription(lines.join('\n'))
             .addFields(
-                { name: `${label} credits on MKDb`, value: `${films.length}`, inline: true },
+                { name: `${label} credits on ${brand.label}`, value: `${films.length}`, inline: true },
                 { name: 'Total on Letterboxd', value: `${total_letterboxd}`, inline: true },
             )
-            .setFooter({ text: `Page ${page + 1}/${totalPages} · sorted by MKDb rank` });
+            .setFooter({ text: `Page ${page + 1}/${totalPages} · sorted by ${brand.label} rank` });
 
         if (contributor.photo_url) anchor.setThumbnail(contributor.photo_url);
 
@@ -140,7 +141,7 @@ export async function runContributor(
         let grid: EmbedBuilder | null = null;
         try {
             const r = await fetch(
-                `${MKDB_API_BASE}/posters-grid?slugs=${encodeURIComponent(slugList)}&labels=${encodeURIComponent(labelList)}`,
+                `${brand.apiBase}/posters-grid?slugs=${encodeURIComponent(slugList)}&labels=${encodeURIComponent(labelList)}`,
             );
             if (r.ok) {
                 const buf = Buffer.from(await r.arrayBuffer());

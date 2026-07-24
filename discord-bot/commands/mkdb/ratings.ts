@@ -11,10 +11,9 @@ import {
 } from 'discord.js';
 
 import type { MkdbSubCommand } from '../types.js';
+import type { Brand } from './_brand.js';
 import { fetchThumbAttachment } from './_thumbnail.js';
 
-const MKDB_API_BASE = process.env.MKDB_API_BASE_URL;
-const MKDB_BASE_URL = process.env.MKDB_BASE_URL || 'https://mkdb.co';
 const PAGE_SIZE = 10;
 
 interface FilmPayload {
@@ -48,13 +47,13 @@ function getStarSymbols(rating: number): string {
 }
 
 const subcommand: MkdbSubCommand = {
-    async execute(interaction: ChatInputCommandInteraction) {
+    async execute(interaction: ChatInputCommandInteraction, brand: Brand) {
         await interaction.deferReply();
         const query = interaction.options.getString('query', true);
 
         // Single-call endpoint: /films/ratings?query=<title> → { slug, film, ratings }
         const res = await fetch(
-            `${MKDB_API_BASE}/films/ratings?query=${encodeURIComponent(query)}`,
+            `${brand.apiBase}/films/ratings?query=${encodeURIComponent(query)}`,
         );
 
         let payload: RatingsPayload | null;
@@ -70,7 +69,7 @@ const subcommand: MkdbSubCommand = {
             }
             if (payload?.code === 'NOT_ON_MKDB') {
                 return interaction.editReply(
-                    `We found a film, but it's not on MKDb. That means none of us have ` +
+                    `We found a film, but it's not on ${brand.label}. That means none of us have ` +
                     `rated it yet. Please try sending the command: \`!f ${query}\``,
                 );
             }
@@ -133,12 +132,12 @@ const subcommand: MkdbSubCommand = {
 
             const embed = new EmbedBuilder()
                 .setTitle(`*${escapeMarkdown(film.title)}* (${film.year ?? '—'}) — Community ratings`)
-                .setURL(`${MKDB_BASE_URL}/film/${slug}`)
+                .setURL(`${brand.siteBase}/film/${slug}`)
                 .setDescription(slice.join('\n'))
                 .addFields(
                     { name: 'Average ★', value: Number(film.average_rating).toFixed(2), inline: true },
                     { name: 'Rating count', value: `${film.rating_count}`, inline: true },
-                    { name: 'MKDb rank', value: film.current_rank ? `#${film.current_rank}` : '—', inline: true },
+                    { name: `${brand.label} rank`, value: film.current_rank ? `#${film.current_rank}` : '—', inline: true },
                 )
                 .setFooter({ text: `Page ${page + 1}/${TOTAL_PAGES}` });
             if (thumb) embed.setThumbnail(thumb.thumbnailUrl);

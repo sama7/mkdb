@@ -15,18 +15,22 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 /**
  * ┌ commands
  * │  └ mkdb
- * │      ├─ index.ts        ← parent command (registered in client.commands)
+ * │      ├─ index.ts        ← parent command(s) (registered in client.commands)
  * │      ├─ search.ts
  * │      ├─ rank.ts
  * │      ├─ random.ts
  * │      ├─ ratings.ts
  * │      ├─ director.ts
  * │      ├─ actor.ts
+ * │      ├─ _brand.ts       ← per-network naming/URLs, not auto-loaded
  * │      └─ _contributor.ts ← shared helper, not auto-loaded
  * └ …
  *
- * The key in client.commands is the parent command name (e.g. "mkdb").
- * Each parent's index.ts dispatches to its own subcommands internally.
+ * The key in client.commands is the parent command name. A folder's index.js
+ * exports an array because one implementation is registered once per network
+ * ("mkdb" for Metropolis, "lkdb" for Lycan); the command name an interaction
+ * arrives under is what selects the network. Each parent dispatches to its own
+ * subcommands internally.
  */
 client.commands = new Collection<string, MkdbCommand>();
 
@@ -43,14 +47,16 @@ for (const groupFolder of readdirSync(commandsRoot)) {
     const mod = await import(pathToFileURL(groupIndex).href);
     // Typed as Partial because the dynamic import resolves to `any`;
     // the runtime presence check below is what actually validates the shape.
-    const command = mod.default as Partial<MkdbCommand> | undefined;
+    const exported = mod.default as Partial<MkdbCommand>[] | Partial<MkdbCommand> | undefined;
 
-    if (command?.data && command?.execute) {
-        client.commands.set(command.data.name, command as MkdbCommand);
-    } else {
-        console.warn(
-            `[WARNING] The command at ${groupIndex} is missing a required "data" or "execute" property.`,
-        );
+    for (const command of Array.isArray(exported) ? exported : [exported]) {
+        if (command?.data && command?.execute) {
+            client.commands.set(command.data.name, command as MkdbCommand);
+        } else {
+            console.warn(
+                `[WARNING] The command at ${groupIndex} is missing a required "data" or "execute" property.`,
+            );
+        }
     }
 }
 
