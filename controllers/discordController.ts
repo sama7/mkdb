@@ -6,7 +6,7 @@ import type { Request, Response } from 'express';
 import pool from '../db/conn.js';
 import { ensureFontconfig } from '../lib/fontconfig.js';
 import { getFilmDetails, getLankFilmDetails, NETWORKS, type Network } from './filmController.js';
-import { apiRequest, paginate } from '../sync/lbx-client.js';
+import { apiRequest, paginate, INTERACTIVE_LBX } from '../sync/lbx-client.js';
 import type { FilmDetailsResponse } from '../types/api.js';
 
 const POSTER_DIR = path.resolve('images/posters');
@@ -98,6 +98,7 @@ function slugFromLink(link?: string): string | null {
 async function searchSlug(rawQuery: string): Promise<string | null> {
     const j = await apiRequest<LetterboxdFilmSearchResponse>('GET', '/search', {
         query: { input: rawQuery, include: 'FilmSearchItem', perPage: '1' },
+        ...INTERACTIVE_LBX,
     });
     return slugFromLink(j.items?.[0]?.film?.link);
 }
@@ -163,7 +164,7 @@ async function _searchFilm(req: Request, res: Response, network: Network) {
             film: detailsPayload.film,
         });
     } catch (err) {
-        console.error('Error in /films/search:', err);
+        console.error(`Error in /films/search (query=${JSON.stringify(rawQuery)}):`, err);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
 }
@@ -222,7 +223,7 @@ async function _searchFilmRatings(req: Request, res: Response, network: Network)
             ratings: details.ratings,
         });
     } catch (err) {
-        console.error('Error in /films/ratings:', err);
+        console.error(`Error in /films/ratings (query=${JSON.stringify(rawQuery)}):`, err);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
 }
@@ -337,6 +338,7 @@ async function _filmsByContributor(req: Request, res: Response, network: Network
     try {
         const search = await apiRequest<LetterboxdContributorSearchResponse>('GET', '/search', {
             query: { input: rawQuery, include: 'ContributorSearchItem', perPage: '1' },
+            ...INTERACTIVE_LBX,
         });
         const hit = search.items?.[0]?.contributor;
         if (!hit) {
@@ -344,12 +346,12 @@ async function _filmsByContributor(req: Request, res: Response, network: Network
         }
         const contributorId = hit.id as string;
 
-        const full = await apiRequest<LetterboxdContributor>('GET', `/contributor/${encodeURIComponent(contributorId)}`);
+        const full = await apiRequest<LetterboxdContributor>('GET', `/contributor/${encodeURIComponent(contributorId)}`, { ...INTERACTIVE_LBX });
         const contributor = shapeContributor(full, type);
 
         const MAX_LIDS = 500;
         const lids: string[] = [];
-        for await (const item of paginate<LetterboxdContributionItem>(`/contributor/${encodeURIComponent(contributorId)}/contributions`, { type, perPage: 100 })) {
+        for await (const item of paginate<LetterboxdContributionItem>(`/contributor/${encodeURIComponent(contributorId)}/contributions`, { type, perPage: 100 }, { ...INTERACTIVE_LBX })) {
             const lid = item?.film?.id;
             if (lid) lids.push(lid);
             if (lids.length >= MAX_LIDS) break;
@@ -389,7 +391,7 @@ async function _filmsByContributor(req: Request, res: Response, network: Network
             total_letterboxd: lids.length,
         });
     } catch (err) {
-        console.error('Error in /films/by-contributor:', err);
+        console.error(`Error in /films/by-contributor (query=${JSON.stringify(rawQuery)}, type=${type}):`, err);
         return res.status(500).json({ error: 'Internal Server Error' });
     }
 }
