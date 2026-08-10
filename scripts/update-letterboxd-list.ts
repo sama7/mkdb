@@ -23,20 +23,30 @@
 //     creation of a list (the fast path); PATCH is for the recurring update.
 //
 // Update algorithm (when list already exists):
-//   Phase A: shrink to 1 entry via DELETE pos=0 in a loop (~999 PATCHes)
-//   Phase B: if leftover != target[0], replace it (ADD target[0], DELETE pos=0)
-//   Phase C: bulk-ADD target[1..999] in batches of 100
-//   Phase D: refetch, verify all 1000 positions match target
+//   The list has no atomic "replace all entries" operation, so it's rebuilt in
+//   place — but UNPUBLISHED first, so the public never sees a half-built list.
+//   An unpublished list 404s for everyone but the owner (verified by probing),
+//   and entry mutations still work while it's hidden. On success we republish;
+//   on failure we deliberately leave it hidden rather than expose a broken list
+//   (a re-run recovers it from any state).
+//     Phase A: shrink to 1 entry via batches of DELETE pos=0 (many per PATCH)
+//     Phase B: if leftover != target[0], replace it (ADD target[0], DELETE pos=0)
+//     Phase C: bulk-ADD target[1..999] in batches of 100 (no dupes by design —
+//              a single duplicate would reject the whole ADD batch)
+//     Phase D: refetch, verify all 1000 positions match target
+//     Then:   republish (published:true)
 
 import 'dotenv/config';
 import crypto from 'crypto';
 import { setTimeout as sleep } from 'timers/promises';
+import { pathToFileURL } from 'node:url';
 import pool from '../db/conn.js';
 
 const BASE = 'https://api.letterboxd.com/api/v0';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const THROTTLE_MS = 350;
 const ADD_BATCH = 100;
+const DELETE_BATCH = 100;   // DELETE pos=0 actions per PATCH; verified safe by probing
 
 interface NetworkSpec {
     listName: string;
@@ -83,7 +93,7 @@ async function throttle(): Promise<void> {
     lastRequestAt = Date.now();
 }
 
-async function fetchAccessToken(): Promise<string> {
+export async function fetchAccessToken(): Promise<string> {
     const body = `grant_type=refresh_token&refresh_token=${encodeURIComponent(REQUIRED_RT)}`;
     const url = buildUrl('/auth/token');
     const res = await fetch(url, {
@@ -115,7 +125,7 @@ async function apiRequest(method: string, token: string, path: string, query: Re
     return { status: res.status, raw, parsed };
 }
 
-interface ListSummary { id: string; name: string; filmCount: number; version: number }
+interface ListSummary { id: string; name: string; filmCount: number; version: number; published: boolean }
 interface ListEntry { rank: number; film: { id: string; name: string } }
 interface PageResp<T> { items?: T[]; next?: string }
 
@@ -162,6 +172,11 @@ async function patch(token: string, listId: string, body: unknown): Promise<Patc
     return { status: r.status, version: data?.version, messages: r.parsed?.messages };
 }
 
+async function setPublished(token: string, listId: string, published: boolean): Promise<void> {
+    const r = await patch(token, listId, { published });
+    if (r.status !== 200) throw new Error(`set published=${published} failed: ${r.status} ${JSON.stringify(r.messages)}`);
+}
+
 async function fetchTargetLids(network: NetworkKey): Promise<string[]> {
     const { rows } = await pool.query<{ letterboxd_id: string }>(
         `SELECT f.letterboxd_id
@@ -197,9 +212,9 @@ async function createListWithEntries(token: string, spec: NetworkSpec, target: s
     return data.id;
 }
 
-async function updateExistingList(token: string, listId: string, target: string[]): Promise<void> {
+export async function updateExistingList(token: string, listId: string, target: string[]): Promise<void> {
     const startSummary = await getListSummary(token, listId);
-    console.log(`[lbx-list] list id=${listId} name="${startSummary.name}" filmCount=${startSummary.filmCount} version=${startSummary.version}`);
+    console.log(`[lbx-list] list id=${listId} name="${startSummary.name}" filmCount=${startSummary.filmCount} version=${startSummary.version} published=${startSummary.published}`);
 
     const currentEntries = await fetchListEntries(token, listId);
     const currentLids = currentEntries.map((e) => e.film.id);
@@ -208,16 +223,45 @@ async function updateExistingList(token: string, listId: string, target: string[
     const identical = currentLids.length === target.length && currentLids.every((l, i) => l === target[i]);
     if (identical) {
         console.log('[lbx-list] list already matches target — nothing to do');
+        // A prior failed run may have left it hidden; make sure it's public.
+        if (!startSummary.published) {
+            console.log('[lbx-list] list was unpublished — republishing');
+            await setPublished(token, listId, true);
+        }
         return;
     }
 
-    // Phase A: shrink to 1 entry. DELETE position is 0-indexed.
-    const toDelete = currentLids.length - 1;
-    console.log(`[lbx-list] phase A: deleting ${toDelete} top entries (position=0 each iteration)`);
-    for (let i = 0; i < toDelete; i++) {
-        const r = await patch(token, listId, { entries: [{ action: 'DELETE', position: 0 }] });
-        if (r.status !== 200) throw new Error(`phase A PATCH failed at iter ${i}: ${r.status} ${JSON.stringify(r.messages)}`);
-        if ((i + 1) % 100 === 0) console.log(`[lbx-list]   phase A ${i + 1}/${toDelete}`);
+    // Unpublish for the duration of the rebuild so the public never sees the
+    // list shrink and regrow. It 404s for everyone but the owner until we
+    // republish at the end. rebuildOk gates the republish: on any failure we
+    // deliberately leave it hidden rather than expose a half-built list.
+    console.log('[lbx-list] unpublishing list for the rebuild (hidden from the public until done)');
+    await setPublished(token, listId, false);
+    let rebuildOk = false;
+    try {
+        await rebuildEntries(token, listId, currentLids, target);
+        rebuildOk = true;
+    } finally {
+        if (rebuildOk) {
+            await setPublished(token, listId, true);
+            console.log('[lbx-list] rebuild verified — list republished');
+        } else {
+            console.error('[lbx-list] rebuild FAILED — leaving list UNPUBLISHED (hidden) so the public never sees a half-built list. Re-run this job to recover.');
+        }
+    }
+}
+
+async function rebuildEntries(token: string, listId: string, currentLids: string[], target: string[]): Promise<void> {
+    // Phase A: shrink to 1 entry. DELETE position is 0-indexed, and many DELETE
+    // actions batch into one PATCH — each removes the current top, so N of them
+    // strip the top N. Verified safe by probing; cuts ~999 calls to ~10.
+    let remaining = currentLids.length;
+    console.log(`[lbx-list] phase A: shrinking ${remaining} -> 1 in batches of ${DELETE_BATCH}`);
+    while (remaining > 1) {
+        const n = Math.min(DELETE_BATCH, remaining - 1);
+        const r = await patch(token, listId, { entries: Array.from({ length: n }, () => ({ action: 'DELETE', position: 0 })) });
+        if (r.status !== 200) throw new Error(`phase A PATCH failed at remaining=${remaining}: ${r.status} ${JSON.stringify(r.messages)}`);
+        remaining -= n;
     }
     let summary = await getListSummary(token, listId);
     console.log(`[lbx-list] phase A done. filmCount=${summary.filmCount}`);
@@ -315,9 +359,13 @@ async function main() {
     console.log(`[lbx-list] SUCCESS: ${spec.listName} updated with ${target.length} entries in ${Math.floor(dur / 60)}m ${dur % 60}s`);
 }
 
-main()
-    .then(() => pool.end())
-    .catch((err) => {
-        console.error('[lbx-list] FATAL:', err);
-        pool.end().finally(() => process.exit(1));
-    });
+// Only run the job when invoked directly (node dist/scripts/update-letterboxd-list.js),
+// so tests can import the functions above without firing a real list update.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+    main()
+        .then(() => pool.end())
+        .catch((err) => {
+            console.error('[lbx-list] FATAL:', err);
+            pool.end().finally(() => process.exit(1));
+        });
+}
