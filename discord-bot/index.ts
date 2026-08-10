@@ -1,3 +1,4 @@
+import './log-timestamps.js';   // side effect: timestamp every console line — keep first
 import 'dotenv/config';
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';

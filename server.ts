@@ -1,3 +1,4 @@
+import './lib/log-timestamps.js';   // side effect: timestamp every console line — keep first
 import express from 'express';
 import type { ErrorRequestHandler, Request } from 'express';
 import path from 'path';

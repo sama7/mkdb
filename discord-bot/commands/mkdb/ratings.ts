@@ -73,6 +73,7 @@ const subcommand: MkdbSubCommand = {
                     `rated it yet. Please try sending the command: \`!f ${query}\``,
                 );
             }
+            console.error(`${brand.label} ratings error (query=${JSON.stringify(query)}, status=${res.status}):`, payload ?? '(no JSON body)');
             return interaction.editReply('❌ Server error while searching.');
         }
 
