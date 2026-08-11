@@ -158,8 +158,12 @@ app.use('/images', express.static(path.join(__dirname, 'images')));
 // Apply general rate limit to all API routes, plus a stricter limit on
 // the expensive endpoints (registered before the route handlers run).
 app.use('/api', apiLimiter);
-app.use('/api/discord/films/by-contributor', expensiveLimiter);
-app.use('/api/discord/posters-grid', expensiveLimiter);
+// Both networks' copies of these — the /lank variants hit Letterboxd and run
+// sharp exactly like the metro ones, so they need the same stricter limit.
+for (const prefix of ['/api/discord', '/api/discord/lank']) {
+    app.use(`${prefix}/films/by-contributor`, expensiveLimiter);
+    app.use(`${prefix}/posters-grid`, expensiveLimiter);
+}
 
 // Routes
 app.use('/api', filmRoutes);
