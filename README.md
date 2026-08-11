@@ -1,12 +1,14 @@
 # mkdb
 
-A film-ranking site for the **Metropolis** Letterboxd community on Discord. Live at **[mkdb.co](https://mkdb.co)**.
+A film-ranking site for the **Metropolis** and **Lycan** Letterboxd communities on Discord. Live at **[mkdb.co](https://mkdb.co)** (Metropolis) and **[mkdb.co/lank](https://mkdb.co/lank)** (Lycan).
 
-mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterboxd.com/metrodb/) account follows, computes pairwise user-similarity scores from rating overlap, and produces a community ranking that updates every Monday. Members can browse top films, week-over-week risers/fallers/new-entries, and "neighbor" pages comparing two members' tastes side-by-side.
+mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterboxd.com/metrodb/) and [lycandb](https://letterboxd.com/lycandb/) accounts follow, computes pairwise user-similarity scores from rating overlap, and produces a community ranking that updates every Monday. Members can browse top films — filtered by genre, director, country, language, year, runtime, or rating count — plus week-over-week risers/fallers/new-entries and "neighbor" pages comparing two members' tastes side-by-side.
+
+Each Monday the pipeline also pushes the top 1000 to a Letterboxd list per network and posts a status update with five generated images to the Discord **#mank** channel. A Discord bot exposes the same data in-chat.
 
 ## How it works
 
-1. **Discover.** Enumerate metrodb's followings into `users_stg` via the Letterboxd API.
+1. **Discover.** Enumerate metrodb's and lycandb's followings into `users_stg` via the Letterboxd API, OR-merging the network flags so a user followed by both is stored once.
 2. **Ratings.** For each member, page their rated films into `ratings_stg`, stubbing new films into `films`.
 3. **Film details.** For films we've never seen before (`details_fetched_at IS NULL`), fetch full metadata + poster JPG. Existing films are skipped — details are fetched once and reused.
 4. **Promote.** In one transaction: TRUNCATE+INSERT live `users` and `ratings` from staging, recompute `user_similarity_scores` (overlap-weighted average rating distance), append a new week to `film_rankings_history`, trim history to the last 3 weeks, and delete orphan films + their poster files.
@@ -16,8 +18,9 @@ mkdb pulls weekly Letterboxd ratings from everyone the [metrodb](https://letterb
 - **Backend:** TypeScript + Node.js (ES modules) + Express + `pg` driver
 - **Database:** PostgreSQL 16
 - **Frontend:** React + Vite + react-bootstrap + react-router-dom (in [`client/`](client/))
-- **Discord bot:** mankbot — Discord.js slash commands that call the `/api/discord/*` endpoints (TypeScript, in [`discord-bot/`](discord-bot/))
-- **Data source:** [Letterboxd API](https://api-docs.letterboxd.com/) (HMAC-SHA256 signed requests, client-credentials Bearer token)
+- **Discord bot:** mankbot — Discord.js slash commands (`/mkdb`, `/lkdb`) that call the `/api/discord/*` endpoints (TypeScript, in [`discord-bot/`](discord-bot/))
+- **Images:** `sharp` — poster grids for the bot and the five weekly #mank images, composited from SVG overlays
+- **Data source:** [Letterboxd API](https://api-docs.letterboxd.com/) (HMAC-SHA256 signed requests; client-credentials Bearer token for reads, refresh-token grant for list writes)
 - **Process management:** pm2 (`server`, `mankbot`)
 - **Reverse proxy:** nginx → Node on `localhost:3000`
 
@@ -40,12 +43,22 @@ mkdb/
 │   ├── sync-ratings.ts       #   page each member's ratings into ratings_stg
 │   ├── sync-films.ts         #   fetch detail + poster for new films
 │   └── download-image.ts     #   shared HTTPS-with-redirect downloader
-├── scripts/promote.ts        # runs sql/promote_and_rank.sql + unlinks orphan posters
+├── scripts/
+│   ├── promote.ts            #   runs sql/promote_and_rank.sql + unlinks orphan posters
+│   ├── scheduled-sync.ts     #   data-driven sync start time (see "Dynamic sync start time")
+│   ├── update-letterboxd-list.ts  # weekly top-1000 push to Letterboxd
+│   ├── weekly-images.ts      #   renders the five #mank grid images with sharp
+│   ├── post-weekly-update.ts #   posts the weekly status + images to #mank
+│   └── mkdb.crontab          #   source of truth for the production schedule
+├── lib/
+│   ├── fontconfig.ts         # points fontconfig at the bundled fonts (VPS has none)
+│   └── log-timestamps.ts     # prepends an ISO timestamp to every console line
+├── assets/fonts/             # Roboto (text) + Inter (▲/▼ glyphs Roboto lacks)
 ├── sql/
 │   ├── 001_schema_for_api.sql        # one-time API-migration ALTERs
 │   └── promote_and_rank.sql          # the promote transaction
 ├── client/                   # React + Vite frontend
-├── discord-bot/              # mankbot — Discord.js slash commands
+├── discord-bot/              # mankbot — Discord.js slash commands (/mkdb, /lkdb)
 ├── images/
 │   ├── posters/<slug>.jpg          # film posters (one-shot download, served by Express)
 │   ├── placeholder-poster.svg      # SVG served in place of empty-stub posters (films Letterboxd has no artwork for)
@@ -85,6 +98,7 @@ Copy [`.env.example`](.env.example) to `.env` at the repo root and fill in the v
 # Letterboxd API (https://api-docs.letterboxd.com/)
 LETTERBOXD_CLIENT_ID=
 LETTERBOXD_CLIENT_SECRET=
+LETTERBOXD_REFRESH_TOKEN= # write scope, for the weekly top-1000 list updates
 
 # PostgreSQL
 DB_USER=                  # production
@@ -97,11 +111,15 @@ DB_PORT=5432
 PORT=3000
 NODE_ENV=                 # set to "production" on the VPS
 RATE_LIMIT_SKIP_IPS=      # optional, comma-separated IPs exempt from rate limiting (loopback already exempt)
+
+# Weekly Discord post (scripts/post-weekly-update.ts)
+DISCORD_TOKEN=            # same bot token the bot uses
+MANK_CHANNEL_ID=          # defaults to the #mank channel if unset
 ```
 
-The `/lank` subset is no longer configured via env — it's the set of users followed by the `lycandb` Letterboxd account, discovered automatically each sync. See "Networks (metro vs lank)" below.
+The `/lank` subset is not configured via env — it's the set of users followed by the `lycandb` Letterboxd account, discovered automatically each sync. See "Networks (metro vs lank)" above.
 
-The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, one or more `guildId*` entries, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`. `deploy-commands` picks up every env var matching `/^guildId/i` and PUTs the same command set to each — so prod can register slash commands across multiple servers (e.g. `guildIdMetro=...`, `guildIdLycan=...`) with no code change. We prefer guild-scoped registration because it propagates instantly; global commands sit in Discord's CDN cache for up to an hour.
+The Discord bot has its own [`discord-bot/.env.example`](discord-bot/.env.example) — copy it to `discord-bot/.env` and fill in `DISCORD_TOKEN`, `clientId`, one or more `guildId*` entries, `MKDB_API_BASE_URL`, and `MKDB_BASE_URL`. `deploy-commands` picks up every env var matching `/^guildId/i` and registers **that guild's own network command**: `guildIdMetro` gets `/mkdb`, `guildIdLycan` gets `/lkdb`, and a bare `guildId` (dev) gets both. So prod serves multiple servers with no code change, and neither guild can be handed the other's command. We prefer guild-scoped registration because it propagates instantly; global commands sit in Discord's CDN cache for up to an hour.
 
 ## Local development
 
@@ -157,7 +175,7 @@ Three stages, scheduled and monitored independently:
 
 - `npm run sync` — discover community members → pull ratings into staging → fetch details + posters for new films. Truncates staging at the start so each run is self-contained. Recent runs take ~45-50 minutes.
 - `npm run promote` — swap staging into live tables in one transaction, recompute similarity, append the new ranking week, trim history to 3 weeks, delete orphan films + posters. Typically <30 seconds.
-- `npm run update-letterboxd-list:metro` / `:lank` — push the latest top 1000 for each network to Letterboxd ([mkdb-top-1000](https://letterboxd.com/samah_/list/mkdb-top-1000/) / [lkdb-top-1000](https://letterboxd.com/samah_/list/lkdb-top-1000/)) via the Letterboxd API. Auth uses `LETTERBOXD_REFRESH_TOKEN` (authorization_code grant — required for write scope on owner's lists). ~7-8 minutes per run (Letterboxd's PATCH /list/{id} entries API is quirky — see source comments).
+- `npm run update-letterboxd-list:metro` / `:lank` — push the latest top 1000 for each network to Letterboxd ([mkdb-top-1000](https://letterboxd.com/samah_/list/mkdb-top-1000/) / [lkdb-top-1000](https://letterboxd.com/samah_/list/lkdb-top-1000/)) via the Letterboxd API. Auth uses `LETTERBOXD_REFRESH_TOKEN` (refresh_token grant — required for write scope on the owner's lists). ~40 seconds per run; a no-op run that finds the list already correct takes ~13s. See "Letterboxd list updates" below for why the rebuild looks the way it does.
 - `npm run post-weekly-update` — post the weekly status to Discord **#mank** as the bot: the `MKDb Week N is now live` message plus five grid images (top ranked, risers, fallers, new entries, new departures) generated server-side by [`scripts/weekly-images.ts`](scripts/weekly-images.ts) with `sharp`. Needs `DISCORD_TOKEN`. Text is rendered via the bundled font in [`assets/fonts/Roboto.ttf`](assets/fonts/) (the VPS has no system fonts, so the script points fontconfig at the bundled font at runtime — nothing to install).
 
 The crontab chains promote → metro list → lank list → Discord post with `&&`, so each step is gated on the previous succeeding and a botched promote never propagates stale data downstream.
@@ -195,6 +213,17 @@ Tuning knobs live at the top of [`scripts/scheduled-sync.ts`](scripts/scheduled-
 
 Throughput: ~120 films/min for full detail fetches (measured during the initial backfill of ~59k films, which took ~9 hours). Steady-state weekly syncs only hit the detail endpoint for genuinely new films (`details_fetched_at IS NULL`); the bulk of runtime is paginating each member's ratings.
 
+### Letterboxd list updates
+
+The API has no atomic "replace all entries" operation, so the weekly top-1000 list is rebuilt in place. That would be visible to the public — the list shrinking to one entry and regrowing — so the rebuild runs while the list is **unpublished**. An unpublished list 404s for everyone but the owner, and entry mutations still work, so nobody sees a partial list; it flips back in one step at the end. On failure it is deliberately left hidden rather than republished half-built, and re-running the job recovers it from any state.
+
+Behaviors established by probing the API (all verified against throwaway lists, not the live ones):
+
+- `DELETE` position is **0-indexed**; `ADD`'s position field is **ignored** — ADDs always append.
+- Many actions batch into one `PATCH`. Phase A shrinks 1000 → 1 in ~10 requests instead of ~999.
+- An `ADD` batch is **all-or-nothing**: one unrecognized film ID rejects every entry in the request. Letterboxd retires IDs when it merges duplicate film entries, so a rejected batch is bisected to isolate the offender and add the rest. Dropped films are reported by ID and excluded from the final position check, capped at `MAX_REJECTED` — beyond that the run aborts rather than publish a list with a big hole.
+- Lists cap at 1000 entries, can't be emptied, and duplicate ADDs are refused.
+
 ## API endpoints
 
 Site routes (mounted at `/api`, see [`routes/filmRoutes.ts`](routes/filmRoutes.ts)):
@@ -226,34 +255,46 @@ Routes the Discord bot consumes (mounted at `/api/discord`, see [`routes/discord
 |---|---|
 | `GET /films/search?query=…` | Resolve a search term to a slug + film payload |
 | `GET /films/rank/:rank` | Film at the given top-rankings position |
-| `GET /films/nearmank/:rank` | Film at the given near-mank position (7–9 ratings, top 100) |
+| `GET /films/nearmank/:rank` | Film at the given near-mank position (top 100 of the films that just miss the ranking cutoff — 7–9 raters for metro, derived from each network's own threshold) |
 | `GET /films/ratings?query=…` | Search a film and return its ratings histogram |
-| `GET /films/by-contributor?query=…&type=Director\|Actor` | Films by a director or actor, joined against MKDb |
-| `GET /posters-grid?slugs=…` | Adaptive PNG composite of 1-8 film posters (single row for 1-4, two rows for 5-8), generated on-demand by `sharp`. Slugs with no artwork fall back to the placeholder SVG. |
+| `GET /films/by-contributor?query=…&type=Director\|Actor` | Films by a director or actor, joined against the database |
+| `GET /top?limit=&filters=` | Backs `/mkdb top` — reuses the site's ranking query verbatim, so the bot and the website can't drift apart |
+| `GET /filter-options` | Distinct genres / countries / languages, for autocomplete |
+| `GET /directors/search?query=` | Director type-ahead, ordered by film count |
+| `GET /posters-grid?slugs=…&labels=…` | Adaptive JPEG composite of 1-8 film posters (single row for 1-4, two rows for 5-8), generated on-demand by `sharp`. With `labels`, each poster is drawn as a numbered card. Slugs with no artwork fall back to the placeholder SVG. |
+
+Every route above is also mounted under **`/api/discord/lank/…`**, ranked against the lycandb membership — that's what `/lkdb` calls. Posters and the filter vocabularies come from the shared `films` table, so both prefixes reuse those handlers.
 
 ### Rate limits
 
 External clients are rate-limited per IP via [`express-rate-limit`](https://www.npmjs.com/package/express-rate-limit):
 
 - **100 req/min** for any `/api/*` route
-- **30 req/min** for `/api/discord/films/by-contributor` and `/api/discord/posters-grid` (these hit the Letterboxd API and run `sharp`)
+- **30 req/min** for `films/by-contributor` and `posters-grid` under both `/api/discord` and `/api/discord/lank` (these hit the Letterboxd API and run `sharp`)
 
 Loopback (`127.0.0.1`, `::1`) is exempt — that's how mankbot reaches the API in prod, by calling `http://localhost:3000` directly. Add comma-separated IPs to `RATE_LIMIT_SKIP_IPS` to exempt others. Pagination endpoints also cap `?limit=N` at 500.
 
 ## Discord bot
 
-mankbot exposes a single `/mkdb` slash command with subcommands. All replies are paginated embeds with ⏮ ◀ ▶ ⏭ buttons where applicable.
+mankbot serves both communities from one application, with one command per network: **`/mkdb`** in the Metropolis guild and **`/lkdb`** in the Lycan guild. The subcommands are identical — only the branding (MKDb/LKDb), the API prefix, and the links differ — so there is exactly one implementation of each, parameterized by [`discord-bot/commands/mkdb/_brand.ts`](discord-bot/commands/mkdb/_brand.ts). All replies are paginated embeds with ⏮ ◀ ▶ ⏭ buttons where applicable.
 
-| Command | Description |
+| Subcommand | Description |
 |---|---|
-| `/mkdb search query:<text>` | Search MKDb for a film |
-| `/mkdb rank number:<1–1000>` | Film at the given MKDb rank |
-| `/mkdb random scope:<top1000\|ultramank\|nearmank>` | Random film from the chosen bucket |
-| `/mkdb ratings query:<text>` | Show community ratings for a film |
-| `/mkdb director query:<text>` | Films directed by someone, matched against MKDb |
-| `/mkdb actor query:<text>` | Films an actor appeared in, matched against MKDb |
+| `search query:<text>` | Search for a film |
+| `rank number:<1–1000>` | Film at the given rank |
+| `random scope:<top1000\|ultramank\|nearmank>` | Random film from the chosen bucket |
+| `ratings query:<text>` | Show community ratings for a film |
+| `director query:<text>` | Films directed by someone, matched against the database |
+| `actor query:<text>` | Films an actor appeared in, matched against the database |
+| `top [count] [filters…]` | Top ranked films (1–120, default 40) with the same filters as the website |
 
-`/mkdb director` and `/mkdb actor` page through the person's contributions on Letterboxd, intersect with MKDb, and present each page as a card with the contributor photo as a thumbnail plus a poster composite — 1 to 8 tiles depending on how many films land on that page, rendered by the `posters-grid` endpoint and uploaded as a Discord file attachment so no public image URL is required.
+**Which guild sees which command** is decided at registration, not at runtime: `deploy-commands` reads the suffix on each `guildId*` env var (`guildIdMetro` → `/mkdb`, `guildIdLycan` → `/lkdb`), so a guild is only ever sent its own network's command. A bare `guildId=…` (the local dev server) gets both so either can be tested.
+
+`top` accepts every filter the web UI has — `genres`, `directors`, `countries`, `languages`, plus year/runtime/rating-count ranges. The list filters take a comma-separated string where a leading `-` excludes, e.g. `countries: japan, -usa`. Multiple values are ANDed (`japan,france` means co-productions, not either). Each option autocompletes: only the segment being typed is completed and the choice carries the whole rebuilt string, so picking one appends rather than replaces. Directors are queried live (~29k names, kept in film-count order); the other vocabularies come from a 30-minute cache.
+
+`director`, `actor`, and `top` attach a numbered card grid — 1 to 8 tiles depending on how many films land on that page — so a row in the text list maps to a tile at a glance. It's rendered by the `posters-grid` endpoint and uploaded as a Discord file attachment, so no public image URL is required.
+
+`post-weekly-update` posts to **#mank** as the bot; that needs Send Messages **and** Attach Files in the channel.
 
 ## Production
 
