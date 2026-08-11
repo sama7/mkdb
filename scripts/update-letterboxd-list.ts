@@ -47,6 +47,12 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 const THROTTLE_MS = 350;
 const ADD_BATCH = 100;
 const DELETE_BATCH = 100;   // DELETE pos=0 actions per PATCH; verified safe by probing
+// A film Letterboxd no longer recognizes (IDs get retired when duplicate film
+// entries are merged) is dropped rather than failing the whole run, but only up
+// to this many. Beyond it something systemic is wrong — a broken token, a bad
+// target query — and publishing a list with a big hole is worse than not
+// publishing at all, so the run fails and leaves the list hidden.
+const MAX_REJECTED = 10;
 
 interface NetworkSpec {
     listName: string;
@@ -177,6 +183,48 @@ async function setPublished(token: string, listId: string, published: boolean): 
     if (r.status !== 200) throw new Error(`set published=${published} failed: ${r.status} ${JSON.stringify(r.messages)}`);
 }
 
+function errorMessages(messages?: { type: string; code: string; title: string }[]): { type: string; code: string; title: string }[] {
+    return (messages ?? []).filter((m) => m.type === 'Error');
+}
+
+/**
+ * ADD a run of films, returning the LIDs Letterboxd refused.
+ *
+ * An ADD batch is all-or-nothing: one unknown film ID rejects every entry in
+ * the request (verified by probing — 0 of 9 valid films were added alongside
+ * one bad one). A single retired LID would therefore lose a whole batch of 100,
+ * fail verification, and leave the list unpublished. So a rejected batch is
+ * bisected to isolate the offender(s) and add everything else, which costs only
+ * ~log2(n) extra requests and doesn't depend on parsing the error text.
+ *
+ * A non-200 is a transport/auth failure rather than a bad film, and still throws.
+ */
+async function addFilms(token: string, listId: string, lids: string[], rejected: string[]): Promise<void> {
+    if (lids.length === 0) return;
+
+    const r = await patch(token, listId, { entries: lids.map((lid) => ({ action: 'ADD', film: lid })) });
+    if (r.status !== 200) {
+        throw new Error(`ADD batch of ${lids.length} failed: ${r.status} ${JSON.stringify(r.messages)}`);
+    }
+
+    const errors = errorMessages(r.messages);
+    if (errors.length === 0) return;   // whole batch landed
+
+    if (lids.length === 1) {
+        // Isolated: this single film is the problem. Record and carry on.
+        rejected.push(lids[0]);
+        console.warn(`[lbx-list]   rejected film ${lids[0]}: ${errors.map((m) => `${m.code} ${m.title}`).join('; ')}`);
+        if (rejected.length > MAX_REJECTED) {
+            throw new Error(`too many rejected films (${rejected.length} > ${MAX_REJECTED}) — aborting rather than publishing a list with holes. Rejected: ${rejected.join(',')}`);
+        }
+        return;
+    }
+
+    const mid = Math.floor(lids.length / 2);
+    await addFilms(token, listId, lids.slice(0, mid), rejected);
+    await addFilms(token, listId, lids.slice(mid), rejected);
+}
+
 async function fetchTargetLids(network: NetworkKey): Promise<string[]> {
     const { rows } = await pool.query<{ letterboxd_id: string }>(
         `SELECT f.letterboxd_id
@@ -267,63 +315,72 @@ async function rebuildEntries(token: string, listId: string, currentLids: string
     console.log(`[lbx-list] phase A done. filmCount=${summary.filmCount}`);
     if (summary.filmCount !== 1) throw new Error(`phase A ended with filmCount=${summary.filmCount}, expected 1`);
 
-    // Phase B: ensure the single remaining entry is target[0].
+    // Films Letterboxd refuses (retired IDs) are dropped from the target rather
+    // than failing the run — see addFilms — and reported at the end.
+    const rejected: string[] = [];
+
+    // Phase B: ensure the single remaining entry is the first addable target.
+    // Normally that's target[0]; if Letterboxd has retired it we walk forward,
+    // since the list can't be emptied and something has to hold position 1.
     const after_a = await fetchListEntries(token, listId);
     const leftover = after_a[0]?.film.id;
-    if (leftover !== target[0]) {
-        console.log(`[lbx-list] phase B: leftover LID=${leftover} != target[0]=${target[0]} — replacing`);
-        const r1 = await patch(token, listId, { entries: [{ action: 'ADD', film: target[0] }] });
-        if (r1.status !== 200) throw new Error(`phase B add: ${r1.status} ${JSON.stringify(r1.messages)}`);
+    let head = target[0];
+    if (leftover !== head) {
+        let headIndex = 0;
+        for (; headIndex < target.length; headIndex++) {
+            const candidate = target[headIndex];
+            const before = rejected.length;
+            await addFilms(token, listId, [candidate], rejected);
+            if (rejected.length === before) { head = candidate; break; }
+            console.warn(`[lbx-list] phase B: target[${headIndex}] rejected, trying the next film for position 1`);
+        }
+        if (headIndex >= target.length) throw new Error('phase B: no target film could be added');
+        console.log(`[lbx-list] phase B: replacing leftover LID=${leftover} with ${head}`);
         const r2 = await patch(token, listId, { entries: [{ action: 'DELETE', position: 0 }] });
         if (r2.status !== 200) throw new Error(`phase B del: ${r2.status} ${JSON.stringify(r2.messages)}`);
         const after_b = await fetchListEntries(token, listId);
-        if (after_b.length !== 1 || after_b[0].film.id !== target[0]) {
+        if (after_b.length !== 1 || after_b[0].film.id !== head) {
             throw new Error(`phase B left list in unexpected state: ${after_b.length} entries, top LID=${after_b[0]?.film.id}`);
         }
-        console.log('[lbx-list] phase B done. list is now [target[0]]');
+        console.log('[lbx-list] phase B done. list is now [head]');
     } else {
         console.log('[lbx-list] phase B: leftover already matches target[0], no-op');
     }
 
-    // Phase C: bulk-ADD target[1..999] in batches.
-    const toAdd = target.slice(1);
+    // Phase C: bulk-ADD the rest, skipping anything already placed at the head.
+    const toAdd = target.filter((lid) => lid !== head && !rejected.includes(lid));
     console.log(`[lbx-list] phase C: bulk-ADD ${toAdd.length} target films in batches of ${ADD_BATCH}`);
     for (let i = 0; i < toAdd.length; i += ADD_BATCH) {
-        const batch = toAdd.slice(i, i + ADD_BATCH);
-        const r = await patch(token, listId, { entries: batch.map((lid) => ({ action: 'ADD', film: lid })) });
-        if (r.status !== 200) throw new Error(`phase C PATCH failed at offset ${i + 1}: ${r.status} ${JSON.stringify(r.messages)}`);
-        if (r.messages?.length) {
-            const sample = r.messages.slice(0, 3).map((m) => `${m.code}:${m.title}`).join('; ');
-            console.log(`[lbx-list]   batch ${Math.floor(i / ADD_BATCH) + 1}: ${r.messages.length} message(s): ${sample}`);
-        }
-        console.log(`[lbx-list]   phase C added ${Math.min(i + ADD_BATCH, toAdd.length) + 1}/${target.length}`);
+        await addFilms(token, listId, toAdd.slice(i, i + ADD_BATCH), rejected);
+        console.log(`[lbx-list]   phase C ${Math.min(i + ADD_BATCH, toAdd.length)}/${toAdd.length}`);
     }
 
-    // Phase D: verify
+    // Phase D: verify against the films Letterboxd actually accepted.
+    const expected = target.filter((lid) => !rejected.includes(lid));
+    if (rejected.length > 0) {
+        console.warn(`[lbx-list] ${rejected.length} film(s) rejected by Letterboxd and dropped from the list: ${rejected.join(',')}`);
+    }
     const final = await fetchListEntries(token, listId);
     const finalLids = final.map((e) => e.film.id);
-    console.log(`[lbx-list] phase D: verifying. final filmCount=${finalLids.length}, target=${target.length}`);
+    console.log(`[lbx-list] phase D: verifying. final filmCount=${finalLids.length}, expected=${expected.length}`);
 
-    if (finalLids.length !== target.length) {
-        // Best-effort repair: append any missing target films at the end.
-        const missing = target.filter((l) => !finalLids.includes(l));
-        console.log(`[lbx-list]   ${missing.length} target LIDs missing; appending`);
-        if (missing.length > 0) {
-            const r = await patch(token, listId, { entries: missing.map((lid) => ({ action: 'ADD', film: lid })) });
-            if (r.status !== 200) console.log(`   add-missing failed: ${r.status}`);
-            if (r.messages?.length) console.log(`   add-missing messages: ${JSON.stringify(r.messages.slice(0, 3))}`);
-        }
+    if (finalLids.length !== expected.length) {
+        // Best-effort repair: append any missing films at the end.
+        const missing = expected.filter((l) => !finalLids.includes(l));
+        console.log(`[lbx-list]   ${missing.length} expected LIDs missing; appending`);
+        await addFilms(token, listId, missing, rejected);
     }
 
     const final2 = await fetchListEntries(token, listId);
     const final2Lids = final2.map((e) => e.film.id);
+    const expected2 = target.filter((lid) => !rejected.includes(lid));
     const mismatches: number[] = [];
-    for (let i = 0; i < target.length; i++) if (final2Lids[i] !== target[i]) mismatches.push(i + 1);
-    if (final2Lids.length !== target.length || mismatches.length > 0) {
+    for (let i = 0; i < expected2.length; i++) if (final2Lids[i] !== expected2[i]) mismatches.push(i + 1);
+    if (final2Lids.length !== expected2.length || mismatches.length > 0) {
         console.error(`[lbx-list] WARNING: final length=${final2Lids.length}, mismatches at ${mismatches.length} positions (first 10: ${mismatches.slice(0, 10).join(',')})`);
         throw new Error('list contents mismatch after update');
     }
-    console.log(`[lbx-list] verified: all ${target.length} positions match target`);
+    console.log(`[lbx-list] verified: all ${expected2.length} positions match target${rejected.length ? ` (${rejected.length} film(s) dropped as unknown to Letterboxd)` : ''}`);
 }
 
 function parseNetworkArg(): NetworkKey {
