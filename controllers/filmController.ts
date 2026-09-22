@@ -475,7 +475,13 @@ async function _getMembers(req: Request, res: Response, network: Network) {
         const limit = clampLimit(rawLimit, 25);
         const offset = (Number(page) - 1) * limit;
 
-        const orderBy = sort === 'Name' ? 'UPPER(display_name) ASC' : 'num_films_watched DESC';
+        // NULLS LAST matters: Postgres sorts NULLs first under DESC, so members
+        // whose num_films_watched never got populated (their leg of the weekly
+        // sync failed against Letterboxd) would otherwise monopolize page 1 and
+        // push every real member off it. Park them at the end instead.
+        const orderBy = sort === 'Name'
+            ? 'UPPER(display_name) ASC'
+            : 'num_films_watched DESC NULLS LAST';
         const query = `
             SELECT
                 COUNT(*) OVER() AS total_count,

@@ -1,9 +1,10 @@
 import { Link } from "react-router-dom";
 import type { User } from '../types';
 import { useNetwork } from '../network';
+import { formatCount } from '../format';
 
 type MemberRow = User & {
-    num_films_watched: number;
+    num_films_watched: number | null;
 };
 
 interface MembersRowsProps {
@@ -33,7 +34,7 @@ export default function MembersRows(props: MembersRowsProps) {
                 <td className="align-middle icon-watched">
                     <div className="watched-cell">
                         <span className="icon"></span>
-                        {member.num_films_watched.toLocaleString()}
+                        {formatCount(member.num_films_watched)}
                     </div>
                 </td>
             </tr>

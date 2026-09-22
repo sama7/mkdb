@@ -21,13 +21,25 @@ PATH=/usr/bin:/bin
 # state syncs (metro + lank) run ~42-49 min. See scripts/scheduled-sync.ts.
 0 17 * * 0 cd /root/mkdb && npm run sync:scheduled >> dumps/sync_$(date +\%F).log 2>&1
 
-# Mon 12:00 AM ET — swap staging into live, recompute similarity, append the
-# new ranking week, trim history, delete orphan films + posters. Promote
-# itself takes ~30 sec. Then, in a && chain (each step gated on the prior
-# succeeding, so stale data never propagates):
+# Mon 12:00 AM ET — first run the pre-promote data check, which refuses to
+# promote when more than one member came out of the sync incomplete (it
+# emails either way; see scripts/preflight-promote.ts). Then swap staging
+# into live, recompute similarity, append the new ranking week, trim
+# history, delete orphan films + posters. Promote itself takes ~30 sec.
+# Then, in a && chain (each step gated on the prior succeeding, so stale
+# data never propagates):
 #   1. push the metro top 1000 to Letterboxd   (~7-8 min)
 #   2. push the lank top 1000 to Letterboxd     (~7-8 min)
 #   3. post the weekly status update to Discord #mank with 5 grid images
 #      (needs DISCORD_TOKEN; a few seconds).
 # Full chain finishes by ~00:17 AM Monday.
-0  0 * * 1 cd /root/mkdb && npm run promote && npm run update-letterboxd-list:metro && npm run update-letterboxd-list:lank && npm run post-weekly-update >> dumps/promote_$(date +\%F).log 2>&1
+0  0 * * 1 cd /root/mkdb && npm run preflight-promote && npm run promote && npm run update-letterboxd-list:metro && npm run update-letterboxd-list:lank && npm run post-weekly-update >> dumps/promote_$(date +\%F).log 2>&1
+
+# Hourly — check the live site and email on failure.
+#
+# Added after 2026-09-20, when a Letterboxd outage mid-sync left 26 members
+# with no watched count, promote swapped that into live, and the members page
+# crashed client-side for ~14 hours before anyone noticed. Every layer was
+# returning 200s, so the check asserts on response *content*, not status codes.
+# It emails once per failure and stays quiet until the check recovers.
+0  * * * * cd /root/mkdb && npm run healthcheck >> dumps/healthcheck_$(date +\%F).log 2>&1

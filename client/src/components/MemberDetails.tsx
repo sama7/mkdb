@@ -6,6 +6,7 @@ import MemberNeighborsTable from './MemberNeighborsTable';
 import MemberSortNeighborsDropdown from './MemberSortNeighborsDropdown';
 import type { Member, NeighborSort, NeighborSummary } from '../types';
 import { useNetwork } from '../network';
+import { formatCount } from '../format';
 
 export default function MemberDetails() {
     const { apiBase, network } = useNetwork();
@@ -139,7 +140,7 @@ export default function MemberDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {member.num_films_watched.toLocaleString()}
+                            {formatCount(member.num_films_watched)}
                         </div>
                     </div>
                 </div>
@@ -172,7 +173,7 @@ export default function MemberDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {member.num_films_watched.toLocaleString()}
+                            {formatCount(member.num_films_watched)}
                         </div>
                     </div>
                 </div>
@@ -206,7 +207,7 @@ export default function MemberDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {member.num_films_watched.toLocaleString()}
+                            {formatCount(member.num_films_watched)}
                         </div>
                     </div>
                 </div>
@@ -238,7 +239,7 @@ export default function MemberDetails() {
                     </div>
                     <div className="watched-cell">
                         <span className="icon"></span>
-                        {member?.num_films_watched.toLocaleString()}
+                        {formatCount(member?.num_films_watched)}
                     </div>
                     <div>
                         Average rating: {Number(member?.avg_rating).toFixed(2)} / 5

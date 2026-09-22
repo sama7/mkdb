@@ -3,6 +3,7 @@ import pool from '../db/conn.js';
 import { discoverMembers } from './discover-members.js';
 import { syncAllRatings } from './sync-ratings.js';
 import { syncNewFilms } from './sync-films.js';
+import { sendCriticalAlert } from '../lib/alert.js';
 
 // Orchestrator order matters:
 // 0. Truncate staging tables so each run starts clean.
@@ -45,19 +46,41 @@ async function main() {
     console.log(`[sync] discovered metro=${metroCount}, lycan=${lycanCount}, union=${total} members in ${formatDuration(Date.now() - tDiscover)}`);
 
     const tRatings = Date.now();
-    const { totalIngested } = await syncAllRatings();
+    const { totalIngested, failedMembers, memberCount } = await syncAllRatings();
     console.log(`[sync] ratings ingested: ${totalIngested} in ${formatDuration(Date.now() - tRatings)}`);
+    if (failedMembers.length > 0) {
+        console.error(`[sync] ${failedMembers.length}/${memberCount} members incomplete: ${failedMembers.join(', ')}`);
+    }
 
     const tFilms = Date.now();
     const filmsResult = await syncNewFilms();
     console.log(`[sync] film details: ok=${filmsResult.ok}, failed=${filmsResult.failed}, total=${filmsResult.total} in ${formatDuration(Date.now() - tFilms)}`);
 
     console.log(`[sync] done in ${formatDuration(Date.now() - t0)} (staging populated; run \`npm run promote\` to swap into live)`);
+
+    // The pre-promote gate is what actually blocks bad data from going live
+    // (see scripts/preflight-promote.ts); this is the earlier heads-up, sent
+    // hours before promote runs so there is time to re-run the sync by hand.
+    if (failedMembers.length > 0) {
+        await sendCriticalAlert(
+            `sync finished with ${failedMembers.length}/${memberCount} members incomplete`,
+            `The weekly sync completed, but these members failed both the main pass and the\n` +
+            `retry pass, so their data in staging is incomplete:\n\n` +
+            failedMembers.map((u) => `  ${u}`).join('\n') + `\n\n` +
+            `Monday's promote will re-check this and block if more than one member is\n` +
+            `incomplete. To fix before then, re-run \`npm run sync\` on the VPS.`,
+        );
+    }
 }
 
 main()
     .then(() => pool.end())
-    .catch((err) => {
+    .catch(async (err) => {
         console.error('[sync] fatal:', err);
+        await sendCriticalAlert(
+            'weekly sync CRASHED',
+            `The weekly sync threw and did not finish. Staging is likely half-populated,\n` +
+            `and Monday's promote will be blocked by the pre-promote check.\n\n${err?.stack || err}`,
+        );
         pool.end().finally(() => process.exit(1));
     });

@@ -8,6 +8,7 @@ import CircleProgress from './CircleProgress';
 import FilmCardAgreed from './FilmCardAgreed';
 import FilmCardDiffer from './FilmCardDiffer';
 import type { Member, NeighborFilm, NeighborSummary } from '../types';
+import { formatCount } from '../format';
 
 export default function NeighborDetails() {
     const { apiBase, urlBase } = useNetwork();
@@ -289,7 +290,7 @@ export default function NeighborDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {firstMember?.num_films_watched.toLocaleString()}
+                            {formatCount(firstMember?.num_films_watched)}
                         </div>
                         <div>
                             {avgRatingString(Number(firstMember?.avg_rating).toFixed(2))}
@@ -313,7 +314,7 @@ export default function NeighborDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {secondMember?.num_films_watched.toLocaleString()}
+                            {formatCount(secondMember?.num_films_watched)}
                         </div>
                         <div>
                             {avgRatingString(Number(secondMember?.avg_rating).toFixed(2))}
@@ -349,7 +350,7 @@ export default function NeighborDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {firstMember?.num_films_watched.toLocaleString()}
+                            {formatCount(firstMember?.num_films_watched)}
                         </div>
                         <div>
                             {avgRatingString(Number(firstMember?.avg_rating).toFixed(2))}
@@ -373,7 +374,7 @@ export default function NeighborDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {secondMember?.num_films_watched.toLocaleString()}
+                            {formatCount(secondMember?.num_films_watched)}
                         </div>
                         <div>
                             {avgRatingString(Number(secondMember?.avg_rating).toFixed(2))}
@@ -443,7 +444,7 @@ export default function NeighborDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {firstMember?.num_films_watched.toLocaleString()}
+                            {formatCount(firstMember?.num_films_watched)}
                         </div>
                         <div>
                             {avgRatingString(Number(firstMember?.avg_rating).toFixed(2))}
@@ -467,7 +468,7 @@ export default function NeighborDetails() {
                         </div>
                         <div className="watched-cell">
                             <span className="icon"></span>
-                            {secondMember?.num_films_watched.toLocaleString()}
+                            {formatCount(secondMember?.num_films_watched)}
                         </div>
                         <div>
                             {avgRatingString(Number(secondMember?.avg_rating).toFixed(2))}
@@ -531,7 +532,7 @@ export default function NeighborDetails() {
                     </div>
                     <div className="watched-cell">
                         <span className="icon"></span>
-                        {firstMember?.num_films_watched.toLocaleString()}
+                        {formatCount(firstMember?.num_films_watched)}
                     </div>
                     <div>
                         {avgRatingString(Number(firstMember?.avg_rating).toFixed(2))}
@@ -555,7 +556,7 @@ export default function NeighborDetails() {
                     </div>
                     <div className="watched-cell">
                         <span className="icon"></span>
-                        {secondMember?.num_films_watched.toLocaleString()}
+                        {formatCount(secondMember?.num_films_watched)}
                     </div>
                     <div>
                         {avgRatingString(Number(secondMember?.avg_rating).toFixed(2))}

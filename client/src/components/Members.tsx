@@ -9,7 +9,7 @@ import { useNetwork } from '../network';
 
 type MemberListRow = User & {
     total_count: string;
-    num_films_watched: number;
+    num_films_watched: number | null;
 };
 
 export default function Members() {

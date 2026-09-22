@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { setTimeout as sleep } from 'timers/promises';
 import pool from '../db/conn.js';
 import { apiRequest, paginate } from './lbx-client.js';
 import type { PoolClient } from 'pg';
@@ -181,10 +182,24 @@ async function syncMemberRatings(member: MemberRow, newFilmIds: Set<number>): Pr
         client.release();
     }
 
+    const { expected } = await syncMemberStats(member, ingested);
+    return { ingested, expected };
+}
+
+/**
+ * Pull the member's /statistics counts and record num_films_watched.
+ *
+ * Deliberately separate from the ratings pull, and called again for members
+ * whose ratings pull threw: the two are independent Letterboxd endpoints, and
+ * a member who loses their ratings leg to a transient outage should not also
+ * lose their watched count. A NULL num_films_watched is what surfaces in the
+ * UI, so it is the more visible of the two failures.
+ */
+async function syncMemberStats(member: MemberRow, ingested: number | null): Promise<{ expected: number | undefined }> {
     const stats = await fetchMemberStats(member.letterboxd_id);
     const expected = stats?.counts?.ratings;
     const watched = stats?.counts?.watches ?? stats?.counts?.diaryEntries ?? null;
-    if (expected != null && expected !== ingested) {
+    if (expected != null && ingested != null && expected !== ingested) {
         console.warn(`[ratings] ${member.username}: ingested ${ingested} but API reports ${expected}`);
     }
     if (watched != null) {
@@ -192,17 +207,40 @@ async function syncMemberRatings(member: MemberRow, newFilmIds: Set<number>): Pr
             `UPDATE users_stg SET num_films_watched = $1, time_modified = NOW() WHERE letterboxd_id = $2`,
             [watched, member.letterboxd_id],
         );
+    } else {
+        // Previously silent: stats could come back without a usable count and
+        // the member would keep a NULL watched count with nothing in the log.
+        console.warn(`[ratings] ${member.username}: no watched count available; num_films_watched left unset`);
     }
-    return { ingested, expected };
+    return { expected };
 }
 
-export async function syncAllRatings(): Promise<{ totalIngested: number; newFilmIds: Set<number> }> {
+/**
+ * Pause between the main pass and the retry pass.
+ *
+ * Member failures cluster: Letterboxd degrading for a few minutes takes out
+ * every member whose turn falls inside that window (2026-09-20 lost 26
+ * consecutive members that way). Retrying immediately would just re-hit the
+ * same outage, so the retry pass waits for it to pass first.
+ */
+const RETRY_PASS_DELAY_MS = 5 * 60 * 1000;
+
+export interface SyncRatingsResult {
+    totalIngested: number;
+    newFilmIds: Set<number>;
+    /** Members still failing after the retry pass — these have incomplete data. */
+    failedMembers: string[];
+    memberCount: number;
+}
+
+export async function syncAllRatings(): Promise<SyncRatingsResult> {
     const { rows: members } = await pool.query<MemberRow>(
         `SELECT user_id, letterboxd_id, username FROM users_stg WHERE letterboxd_id IS NOT NULL ORDER BY user_id`,
     );
     console.log(`[ratings] syncing ${members.length} members`);
     const newFilmIds = new Set<number>();
     let totalIngested = 0;
+    const failed: MemberRow[] = [];
 
     for (const [i, m] of members.entries()) {
         try {
@@ -213,9 +251,43 @@ export async function syncAllRatings(): Promise<{ totalIngested: number; newFilm
             }
         } catch (err) {
             console.error(`[ratings] member ${m.username} failed:`, err.message);
+            failed.push(m);
+            // The ratings pull threw before the stats call it normally ends
+            // with, so make that call here. It is a different endpoint and
+            // usually still answers, which keeps the member's watched count
+            // (the part the UI shows) out of the blast radius.
+            try {
+                await syncMemberStats(m, null);
+            } catch (statsErr) {
+                console.error(`[ratings] member ${m.username} stats fallback failed:`, statsErr.message);
+            }
         }
     }
-    return { totalIngested, newFilmIds };
+
+    if (failed.length === 0) return { totalIngested, newFilmIds, failedMembers: [], memberCount: members.length };
+
+    console.warn(`[ratings] ${failed.length}/${members.length} members failed the first pass; retrying in ${RETRY_PASS_DELAY_MS / 60000}m`);
+    await sleep(RETRY_PASS_DELAY_MS);
+
+    const stillFailed: string[] = [];
+    for (const m of failed) {
+        try {
+            const { ingested } = await syncMemberRatings(m, newFilmIds);
+            totalIngested += ingested;
+            console.log(`[ratings] retry ok: ${m.username} (${ingested}, total: ${totalIngested})`);
+        } catch (err) {
+            console.error(`[ratings] retry failed: ${m.username}:`, err.message);
+            stillFailed.push(m.username);
+        }
+    }
+
+    if (stillFailed.length > 0) {
+        console.error(`[ratings] ${stillFailed.length} member(s) incomplete after retry: ${stillFailed.join(', ')}`);
+    } else {
+        console.log(`[ratings] retry pass recovered all ${failed.length} member(s)`);
+    }
+
+    return { totalIngested, newFilmIds, failedMembers: stillFailed, memberCount: members.length };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

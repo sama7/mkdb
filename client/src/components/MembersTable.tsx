@@ -3,7 +3,7 @@ import MembersRows from './MembersRows';
 import type { User } from '../types';
 
 type MemberRow = User & {
-    num_films_watched: number;
+    num_films_watched: number | null;
 };
 
 interface MembersTableProps {

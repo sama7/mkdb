@@ -47,9 +47,10 @@ export interface NeighborSummary {
   avg_rating_distance: string | number;
 }
 
-export type Member = Omit<MemberDetails, 'num_films_watched'> & {
-  num_films_watched: number;
-};
+// num_films_watched is nullable at the source (see MemberDetails); a member
+// whose sync leg failed has no count until the next run. Render paths must
+// go through formatCount() rather than assume a number.
+export type Member = MemberDetails;
 
 export interface FiltersState {
   minYear?: string;
