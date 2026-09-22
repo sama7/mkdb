@@ -78,19 +78,40 @@ async function syncInProgress(): Promise<boolean> {
 }
 
 async function findIncompleteMembers(): Promise<IncompleteMember[]> {
-    // A member is "incomplete" if either leg of their sync didn't land: no
-    // watched count (the /statistics call), or no ratings at all (the /films
-    // pull). Both are symptoms of the same transient-failure mode.
+    // Two independent symptoms of a failed sync leg:
+    //
+    //   1. No watched count. The /statistics call never landed. This is the
+    //      exact state the 2026-09-20 outage left 26 members in, and it is
+    //      what breaks the members page.
+    //
+    //   2. Ratings went from some to none. The /films pull failed for a member
+    //      who demonstrably had ratings last week.
+    //
+    // Note what is deliberately NOT flagged: a member with zero ratings who
+    // also had zero last week. Plenty of members log films without rating them
+    // — 20 of the current 355 — so a bare "0 ratings" test condemns a clean
+    // sync. The comparison is against the live tables, which at preflight time
+    // still hold last week's data because staging has not been promoted yet.
     const { rows } = await pool.query<IncompleteMember>(`
-        SELECT
-            u.username,
-            u.num_films_watched,
-            COUNT(r.rating)::int AS rating_count
-        FROM users_stg u
-        LEFT JOIN ratings_stg r ON r.user_id = u.user_id
-        GROUP BY u.user_id, u.username, u.num_films_watched
-        HAVING u.num_films_watched IS NULL OR COUNT(r.rating) = 0
-        ORDER BY u.username
+        WITH stg AS (
+            SELECT u.user_id, u.username, u.num_films_watched,
+                   COUNT(r.rating)::int AS rating_count
+              FROM users_stg u
+              LEFT JOIN ratings_stg r ON r.user_id = u.user_id
+             GROUP BY u.user_id, u.username, u.num_films_watched
+        ),
+        live AS (
+            SELECT lu.username, COUNT(lr.rating)::int AS rating_count
+              FROM users lu
+              LEFT JOIN ratings lr ON lr.user_id = lu.user_id
+             GROUP BY lu.username
+        )
+        SELECT stg.username, stg.num_films_watched, stg.rating_count
+          FROM stg
+          LEFT JOIN live ON live.username = stg.username
+         WHERE stg.num_films_watched IS NULL
+            OR (stg.rating_count = 0 AND COALESCE(live.rating_count, 0) > 0)
+         ORDER BY stg.username
     `);
     return rows;
 }
