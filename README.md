@@ -115,6 +115,18 @@ RATE_LIMIT_SKIP_IPS=      # optional, comma-separated IPs exempt from rate limit
 # Weekly Discord post (scripts/post-weekly-update.ts)
 DISCORD_TOKEN=            # same bot token the bot uses
 MANK_CHANNEL_ID=          # defaults to the #mank channel if unset
+
+# Critical alerts (lib/alert.ts) — email over HTTPS, not SMTP: the droplet has
+# no MTA and DigitalOcean blocks outbound 25/587. ALERT_EMAIL_ENDPOINT defaults
+# to Resend. Unset values disable sending; alerts still go to the run log.
+ALERT_EMAIL_TO=
+ALERT_EMAIL_FROM=
+ALERT_EMAIL_API_KEY=
+ALERT_EMAIL_ENDPOINT=
+
+# Health check (scripts/healthcheck.ts) — override only for local testing.
+HEALTHCHECK_BASE_URL=
+HEALTHCHECK_STATE_FILE=
 ```
 
 The `/lank` subset is not configured via env — it's the set of users followed by the `lycandb` Letterboxd account, discovered automatically each sync. See "Networks (metro vs lank)" above.
@@ -173,12 +185,16 @@ npm install --include=optional
 
 Three stages, scheduled and monitored independently:
 
-- `npm run sync` — discover community members → pull ratings into staging → fetch details + posters for new films. Truncates staging at the start so each run is self-contained. Recent runs take ~45-50 minutes.
+- `npm run sync` — discover community members → pull ratings into staging → fetch details + posters for new films. Truncates staging at the start so each run is self-contained. Recent runs take ~45-50 minutes. On a Letterboxd outage it stops and waits rather than skipping members — see [Outages and alerting](#outages-and-alerting).
 - `npm run promote` — swap staging into live tables in one transaction, recompute similarity, append the new ranking week, trim history to 3 weeks, delete orphan films + posters. Typically <30 seconds.
 - `npm run update-letterboxd-list:metro` / `:lank` — push the latest top 1000 for each network to Letterboxd ([mkdb-top-1000](https://letterboxd.com/samah_/list/mkdb-top-1000/) / [lkdb-top-1000](https://letterboxd.com/samah_/list/lkdb-top-1000/)) via the Letterboxd API. Auth uses `LETTERBOXD_REFRESH_TOKEN` (refresh_token grant — required for write scope on the owner's lists). ~40 seconds per run; a no-op run that finds the list already correct takes ~13s. See "Letterboxd list updates" below for why the rebuild looks the way it does.
 - `npm run post-weekly-update` — post the weekly status to Discord **#mank** as the bot: the `MKDb Week N is now live` message plus five grid images (top ranked, risers, fallers, new entries, new departures) generated server-side by [`scripts/weekly-images.ts`](scripts/weekly-images.ts) with `sharp`. Needs `DISCORD_TOKEN`. Text is rendered via the bundled font in [`assets/fonts/Roboto.ttf`](assets/fonts/) (the VPS has no system fonts, so the script points fontconfig at the bundled font at runtime — nothing to install).
 
 The crontab chains promote → metro list → lank list → Discord post with `&&`, so each step is gated on the previous succeeding and a botched promote never propagates stale data downstream.
+
+**The promote is gated on the sync having been complete.** [`scripts/preflight-promote.ts`](scripts/preflight-promote.ts) runs first and exits non-zero — stopping the whole chain — unless every member in staging has both a watched count and at least one rating. Zero tolerance is deliberate: the rankings are an average across the whole community, so a member missing their ratings doesn't merely omit that member, it shifts every film they would have rated. A mostly-complete week is a wrong week, not a slightly stale one. Holding leaves last week's correct data live.
+
+Because of that gate the chain is safe to re-run, so cron fires it **hourly** rather than once at Monday midnight. Each rerun no-ops cheaply when the week is already promoted, a sync is still running, or staging is incomplete — the first tick where the data is good promotes, and everything after that is one gate query. This is what keeps a week from being lost when a sync runs long (see below).
 
 ```bash
 # Manual local run (one-off)
@@ -212,6 +228,90 @@ So if the longest of the last 5 syncs took 1h 10m, sync starts at 10:20 PM (midn
 Tuning knobs live at the top of [`scripts/scheduled-sync.ts`](scripts/scheduled-sync.ts) — `LOOKBACK` (default 5 weeks), `BUFFER_MS` (default 30 min), `FALLBACK_DURATION_MS` (used when no prior logs exist).
 
 Throughput: ~120 films/min for full detail fetches (measured during the initial backfill of ~59k films, which took ~9 hours). Steady-state weekly syncs only hit the detail endpoint for genuinely new films (`details_fetched_at IS NULL`); the bulk of runtime is paginating each member's ratings.
+
+## Outages and alerting
+
+### What the sync does when Letterboxd goes down
+
+On 2026-09-20 Letterboxd degraded for several minutes mid-sync. The per-member
+`try/catch` swallowed 26 consecutive failures, the sync exited 0, and promote
+swapped the incomplete data into the live tables. Those members landed with a
+`NULL num_films_watched`, which sorts first under `ORDER BY num_films_watched
+DESC` and so took over page 1 of `/members` — where the client called
+`.toLocaleString()` on it and crashed the render. The page was blank for ~14
+hours and nothing reported a failure, because nothing had failed loudly: sync
+exited 0, promote exited 0, nginx served 200s, and the API returned well-formed
+JSON. Only the *content* was wrong.
+
+The sync now stops on the first failed member and probes Letterboxd directly to
+tell an outage apart from a member-specific problem:
+
+- **Outage** — waits, re-probing every 30 minutes, then retries the *same*
+  member in place. The cursor only advances once that member is ingested, so
+  nothing is skipped. A 12-hour ceiling per run stops a sustained outage from
+  leaving the sync hanging forever with staging half-populated.
+- **Member-specific** (Letterboxd is answering, but this member fails 3 times —
+  a deleted, renamed or private account) — recorded as incomplete and the run
+  moves on. The promote gate then holds the week.
+
+A sync that waits out an outage can finish many hours late, which is why the
+promote chain runs hourly instead of once at midnight.
+
+### Alerting
+
+Critical alerts go out by email through [`lib/alert.ts`](lib/alert.ts). Delivery
+is over an HTTPS provider API rather than SMTP because the droplet has no MTA
+and DigitalOcean blocks outbound 25/587 — anything SMTP-shaped fails silently.
+Configured via `ALERT_EMAIL_*` in `.env`; if those are unset, alerts still land
+in the run log, loudly, and nothing crashes.
+
+Alerts fire for the cases a human has to act on:
+
+| Source | Fires when |
+| --- | --- |
+| `npm run sync` | the run finishes with incomplete members, or crashes outright |
+| `npm run preflight-promote` | a week is still unpromotable 14h in (deduplicated to once per week via `promote_alert_log`) |
+| `npm run healthcheck` | a live-site check fails (once per failure, plus one note on recovery) |
+
+### Health check
+
+[`scripts/healthcheck.ts`](scripts/healthcheck.ts) runs hourly and asserts on
+response **content**, not status codes — every layer returned 200s throughout
+the incident above, so an uptime pinger would have seen a healthy site. It
+checks that the SPA shell still contains the React root, that both `/members`
+endpoints return a full page with no null watched counts, and that both
+rankings endpoints return films.
+
+Failures are deduplicated through a state file (`logs/healthcheck-state.json`):
+a check that keeps failing emails once and then stays quiet until it recovers,
+so a persistent outage doesn't produce hourly mail. Recovery sends one note.
+
+### Recovering from a bad week
+
+```bash
+# Repair only missing watched counts (seconds — no full re-sync needed)
+npm run backfill-watched -- --dry-run
+npm run backfill-watched
+
+# Redo a week whose source data was wrong, keeping its week number
+npm run sync
+npm run preflight-promote -- --redo     # skips the already-promoted guard
+node dist/scripts/promote.js --same-week
+```
+
+`--same-week` drops the current top ranking week per network so the promote's
+`MAX(week) + 1` lands back on the same number, and does both in one transaction
+so a failure leaves the existing week intact. Keeping the number matters because
+the Letterboxd list and the #mank post both refer to "week N" — and because
+risers/fallers derive from `MAX(week)` vs `MAX(week) - 1`, a redone week 94 is
+still compared against week 93.
+
+Ad-hoc #mank messages (for example, a note explaining a correction):
+
+```bash
+npm run mank-message post "some text"
+npm run mank-message delete <messageId>
+```
 
 ### Letterboxd list updates
 
