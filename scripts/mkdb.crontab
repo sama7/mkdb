@@ -21,19 +21,22 @@ PATH=/usr/bin:/bin
 # state syncs (metro + lank) run ~42-49 min. See scripts/scheduled-sync.ts.
 0 17 * * 0 cd /root/mkdb && npm run sync:scheduled >> dumps/sync_$(date +\%F).log 2>&1
 
-# Mon 12:00 AM ET, then hourly through Monday — the weekly promote chain,
-# gated on scripts/preflight-promote.ts.
+# Hourly, every day — the weekly promote chain, gated on
+# scripts/preflight-promote.ts.
 #
-# Hourly rather than once because the sync now waits out a Letterboxd outage
-# (re-probing every 30 min) instead of publishing a partial week. That can push
-# the sync well past midnight, so a single fixed promote would simply miss the
-# week. The gate makes reruns safe and cheap:
+# Hourly rather than once at Monday midnight because the sync now waits out a
+# Letterboxd outage (re-probing every 30 min) instead of publishing a partial
+# week. That can push the sync many hours past midnight, so a single fixed
+# promote would simply miss the week. Every day rather than only Monday so a
+# sync that overruns into Tuesday still lands its week. The gate makes reruns
+# safe and cheap:
 #   - this week already promoted  -> exits 1, chain stops, no output
 #   - a sync is still running     -> exits 1, waits for the next tick
 #   - any member incomplete       -> exits 1; emails once, 14h into the week
 #   - staging complete            -> exits 0, the chain below runs
-# So the first tick where the data is good promotes, and every later tick is a
-# no-op. A week can no longer be lost to a slow sync.
+# So the first tick where the data is good promotes, and every later tick that
+# week is a no-op. A week can no longer be lost to a slow sync. In the normal
+# case this is one cheap gate query an hour and nothing else.
 #
 # The chain itself (each step gated on the prior succeeding, so stale data
 # never propagates):
@@ -43,7 +46,7 @@ PATH=/usr/bin:/bin
 #   3. push the lank top 1000 to Letterboxd     (~7-8 min)
 #   4. post the weekly status update to Discord #mank with 5 grid images
 #      (needs DISCORD_TOKEN; a few seconds).
-0  * * * 1 cd /root/mkdb && npm run preflight-promote && npm run promote && npm run update-letterboxd-list:metro && npm run update-letterboxd-list:lank && npm run post-weekly-update >> dumps/promote_$(date +\%F).log 2>&1
+0  * * * * cd /root/mkdb && npm run preflight-promote && npm run promote && npm run update-letterboxd-list:metro && npm run update-letterboxd-list:lank && npm run post-weekly-update >> dumps/promote_$(date +\%F).log 2>&1
 
 # Hourly — check the live site and email on failure.
 #
