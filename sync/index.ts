@@ -13,7 +13,9 @@ import { sendCriticalAlert } from '../lib/alert.js';
 //     on one row (no duplication of users or ratings).
 // 2. Pull every member's ratings into ratings_stg, stubbing new films into `films`.
 //    Network-agnostic — a user in users_stg is pulled once regardless of which
-//    network(s) they belong to.
+//    network(s) they belong to. On a Letterboxd outage this stops and waits
+//    rather than skipping members: a partial community produces wrong averages,
+//    not merely a thinner list.
 // 3. Sync film details + posters for all new films (details_fetched_at IS NULL).
 //
 // Promote (swap staging → live, recompute similarity per network, append the
@@ -46,7 +48,7 @@ async function main() {
     console.log(`[sync] discovered metro=${metroCount}, lycan=${lycanCount}, union=${total} members in ${formatDuration(Date.now() - tDiscover)}`);
 
     const tRatings = Date.now();
-    const { totalIngested, failedMembers, memberCount } = await syncAllRatings();
+    const { totalIngested, failedMembers, memberCount, outageWaitMs } = await syncAllRatings();
     console.log(`[sync] ratings ingested: ${totalIngested} in ${formatDuration(Date.now() - tRatings)}`);
     if (failedMembers.length > 0) {
         console.error(`[sync] ${failedMembers.length}/${memberCount} members incomplete: ${failedMembers.join(', ')}`);
@@ -64,11 +66,16 @@ async function main() {
     if (failedMembers.length > 0) {
         await sendCriticalAlert(
             `sync finished with ${failedMembers.length}/${memberCount} members incomplete`,
-            `The weekly sync completed, but these members failed both the main pass and the\n` +
-            `retry pass, so their data in staging is incomplete:\n\n` +
+            `The weekly sync finished, but these members' data in staging is incomplete:\n\n` +
             failedMembers.map((u) => `  ${u}`).join('\n') + `\n\n` +
-            `Monday's promote will re-check this and block if more than one member is\n` +
-            `incomplete. To fix before then, re-run \`npm run sync\` on the VPS.`,
+            (outageWaitMs > 0
+                ? `The sync spent ${Math.round(outageWaitMs / 60000)}m waiting for Letterboxd to come back and still\n` +
+                  `could not finish, so the outage outlasted its wait budget.\n\n`
+                : `Letterboxd stayed reachable throughout, so this looks member-specific rather\n` +
+                  `than an outage — a deleted, renamed or private account would do this.\n\n`) +
+            `The promote is gated on this and will hold the week rather than publish partial\n` +
+            `rankings. It re-checks hourly, so fixing the underlying problem and re-running\n` +
+            `\`npm run sync\` is enough — the promote picks it up on its own.`,
         );
     }
 }
@@ -79,8 +86,10 @@ main()
         console.error('[sync] fatal:', err);
         await sendCriticalAlert(
             'weekly sync CRASHED',
-            `The weekly sync threw and did not finish. Staging is likely half-populated,\n` +
-            `and Monday's promote will be blocked by the pre-promote check.\n\n${err?.stack || err}`,
+            `The weekly sync threw and did not finish, so staging is half-populated. The\n` +
+            `promote is gated on staging being complete and will hold the week rather than\n` +
+            `publish it. Re-run \`npm run sync\` on the VPS; the hourly promote check picks\n` +
+            `it up once staging is good.\n\n${err?.stack || err}`,
         );
         pool.end().finally(() => process.exit(1));
     });

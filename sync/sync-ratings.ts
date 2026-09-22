@@ -216,21 +216,75 @@ async function syncMemberStats(member: MemberRow, ingested: number | null): Prom
 }
 
 /**
- * Pause between the main pass and the retry pass.
+ * How often to re-probe Letterboxd while waiting out an outage.
  *
  * Member failures cluster: Letterboxd degrading for a few minutes takes out
  * every member whose turn falls inside that window (2026-09-20 lost 26
- * consecutive members that way). Retrying immediately would just re-hit the
- * same outage, so the retry pass waits for it to pass first.
+ * consecutive members that way, and the resulting week's rankings were wrong).
+ * Rather than push on through an outage and salvage what we can, the sync
+ * stops on the first failure and waits for Letterboxd to come back.
  */
-const RETRY_PASS_DELAY_MS = 5 * 60 * 1000;
+const OUTAGE_POLL_INTERVAL_MS = 30 * 60 * 1000;
+
+/**
+ * Ceiling on total time spent waiting for Letterboxd across one sync run.
+ *
+ * Without a ceiling a sustained outage would leave the sync running forever,
+ * holding staging half-populated with no alert. At this point the run gives up
+ * and reports which members are incomplete; the pre-promote check then blocks
+ * the week rather than publishing wrong rankings.
+ */
+const OUTAGE_MAX_TOTAL_WAIT_MS = 12 * 60 * 60 * 1000;
+
+/** Attempts per member before it is treated as a member-specific problem. */
+const MAX_ATTEMPTS_PER_MEMBER = 3;
 
 export interface SyncRatingsResult {
     totalIngested: number;
     newFilmIds: Set<number>;
-    /** Members still failing after the retry pass — these have incomplete data. */
+    /** Members still incomplete when the run ended. Empty means a clean week. */
     failedMembers: string[];
     memberCount: number;
+    /** Total time spent waiting out Letterboxd outages, in ms. */
+    outageWaitMs: number;
+}
+
+/**
+ * Cheap liveness probe against the endpoint that actually fails during an
+ * outage. A single one-item page is enough to tell "Letterboxd is answering"
+ * from "Letterboxd is down", without burning quota.
+ */
+async function letterboxdHealthy(): Promise<boolean> {
+    try {
+        await apiRequest('GET', '/films', { query: { perPage: '1' }, maxRetries: 1, timeoutMs: 10000 });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Block until Letterboxd answers again, or until the run's outage budget is
+ * spent. Returns the time waited; the caller adds it to the running total.
+ */
+async function waitForLetterboxd(alreadyWaitedMs: number): Promise<{ recovered: boolean; waitedMs: number }> {
+    const started = Date.now();
+    let waited = 0;
+
+    while (alreadyWaitedMs + waited < OUTAGE_MAX_TOTAL_WAIT_MS) {
+        console.warn(`[ratings] Letterboxd unreachable — re-probing in ${OUTAGE_POLL_INTERVAL_MS / 60000}m `
+            + `(waited ${Math.round((alreadyWaitedMs + waited) / 60000)}m of ${OUTAGE_MAX_TOTAL_WAIT_MS / 3600000}h budget)`);
+        await sleep(OUTAGE_POLL_INTERVAL_MS);
+        waited = Date.now() - started;
+
+        if (await letterboxdHealthy()) {
+            console.log(`[ratings] Letterboxd is answering again after ${Math.round(waited / 60000)}m — resuming`);
+            return { recovered: true, waitedMs: waited };
+        }
+    }
+
+    console.error(`[ratings] gave up waiting for Letterboxd after ${Math.round((alreadyWaitedMs + waited) / 60000)}m`);
+    return { recovered: false, waitedMs: waited };
 }
 
 export async function syncAllRatings(): Promise<SyncRatingsResult> {
@@ -240,54 +294,72 @@ export async function syncAllRatings(): Promise<SyncRatingsResult> {
     console.log(`[ratings] syncing ${members.length} members`);
     const newFilmIds = new Set<number>();
     let totalIngested = 0;
-    const failed: MemberRow[] = [];
+    let outageWaitMs = 0;
+    let outageEpisodes = 0;
+    const failedMembers: string[] = [];
 
-    for (const [i, m] of members.entries()) {
-        try {
-            const { ingested } = await syncMemberRatings(m, newFilmIds);
-            totalIngested += ingested;
-            if ((i + 1) % 10 === 0 || i === members.length - 1) {
-                console.log(`[ratings] ${i + 1}/${members.length} (${m.username}: ${ingested}, total: ${totalIngested}, new films: ${newFilmIds.size})`);
-            }
-        } catch (err) {
-            console.error(`[ratings] member ${m.username} failed:`, err.message);
-            failed.push(m);
-            // The ratings pull threw before the stats call it normally ends
-            // with, so make that call here. It is a different endpoint and
-            // usually still answers, which keeps the member's watched count
-            // (the part the UI shows) out of the blast radius.
+    // Index-based rather than for..of: a member whose failure turns out to be
+    // an outage is retried in place after the wait, so the cursor only advances
+    // once that member has actually been ingested. Nothing is skipped.
+    for (let i = 0; i < members.length; i++) {
+        const m = members[i];
+        let attempts = 0;
+
+        while (true) {
+            attempts++;
             try {
-                await syncMemberStats(m, null);
-            } catch (statsErr) {
-                console.error(`[ratings] member ${m.username} stats fallback failed:`, statsErr.message);
+                const { ingested } = await syncMemberRatings(m, newFilmIds);
+                totalIngested += ingested;
+                if ((i + 1) % 10 === 0 || i === members.length - 1) {
+                    console.log(`[ratings] ${i + 1}/${members.length} (${m.username}: ${ingested}, total: ${totalIngested}, new films: ${newFilmIds.size})`);
+                }
+                break;
+            } catch (err) {
+                console.error(`[ratings] member ${m.username} failed (attempt ${attempts}):`, err.message);
+
+                // Distinguish "Letterboxd is down" from "this member is a
+                // problem". Only the former is worth suspending the run for;
+                // a deleted or private account would otherwise stall it.
+                if (!(await letterboxdHealthy())) {
+                    outageEpisodes++;
+                    const { recovered, waitedMs } = await waitForLetterboxd(outageWaitMs);
+                    outageWaitMs += waitedMs;
+                    if (recovered) {
+                        attempts = 0; // the outage was not this member's fault
+                        continue;
+                    }
+                    // Budget spent and Letterboxd is still down. Record every
+                    // remaining member as incomplete rather than spinning
+                    // through them against a dead API.
+                    for (let j = i; j < members.length; j++) failedMembers.push(members[j].username);
+                    console.error(`[ratings] abandoning run with ${members.length - i} member(s) unprocessed`);
+                    return { totalIngested, newFilmIds, failedMembers, memberCount: members.length, outageWaitMs };
+                }
+
+                if (attempts >= MAX_ATTEMPTS_PER_MEMBER) {
+                    console.error(`[ratings] ${m.username}: ${attempts} attempts against a healthy Letterboxd; treating as member-specific`);
+                    failedMembers.push(m.username);
+                    // Different endpoint, usually still answers — keeps the
+                    // watched count out of the blast radius.
+                    try {
+                        await syncMemberStats(m, null);
+                    } catch (statsErr) {
+                        console.error(`[ratings] ${m.username} stats fallback failed:`, statsErr.message);
+                    }
+                    break;
+                }
             }
         }
     }
 
-    if (failed.length === 0) return { totalIngested, newFilmIds, failedMembers: [], memberCount: members.length };
-
-    console.warn(`[ratings] ${failed.length}/${members.length} members failed the first pass; retrying in ${RETRY_PASS_DELAY_MS / 60000}m`);
-    await sleep(RETRY_PASS_DELAY_MS);
-
-    const stillFailed: string[] = [];
-    for (const m of failed) {
-        try {
-            const { ingested } = await syncMemberRatings(m, newFilmIds);
-            totalIngested += ingested;
-            console.log(`[ratings] retry ok: ${m.username} (${ingested}, total: ${totalIngested})`);
-        } catch (err) {
-            console.error(`[ratings] retry failed: ${m.username}:`, err.message);
-            stillFailed.push(m.username);
-        }
+    if (outageEpisodes > 0) {
+        console.log(`[ratings] rode out ${outageEpisodes} Letterboxd outage(s), ${Math.round(outageWaitMs / 60000)}m waiting in total`);
+    }
+    if (failedMembers.length > 0) {
+        console.error(`[ratings] ${failedMembers.length} member(s) incomplete: ${failedMembers.join(', ')}`);
     }
 
-    if (stillFailed.length > 0) {
-        console.error(`[ratings] ${stillFailed.length} member(s) incomplete after retry: ${stillFailed.join(', ')}`);
-    } else {
-        console.log(`[ratings] retry pass recovered all ${failed.length} member(s)`);
-    }
-
-    return { totalIngested, newFilmIds, failedMembers: stillFailed, memberCount: members.length };
+    return { totalIngested, newFilmIds, failedMembers, memberCount: members.length, outageWaitMs };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

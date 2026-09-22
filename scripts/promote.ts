@@ -46,12 +46,30 @@ export async function runPromote(opts: { sameWeek?: boolean } = {}) {
     const client = await pool.connect();
     let orphanSlugs: string[] = [];
     try {
-        if (opts.sameWeek) await dropCurrentWeek(client);
-        const result = await client.query(sql);
-        // node-postgres returns the last command's result for multi-statement queries.
-        // The trailing SELECT in promote_and_rank.sql returns the deleted orphan slugs.
-        const last = (Array.isArray(result) ? result[result.length - 1] : result) as QueryResult<{ slug?: string }>;
-        orphanSlugs = (last?.rows ?? []).map((r) => r.slug).filter(Boolean) as string[];
+        if (opts.sameWeek) {
+            // Dropping the current week and recomputing it has to be atomic:
+            // if the drop committed and the promote then failed, the week would
+            // be gone with nothing to replace it. An explicit transaction means
+            // a failure leaves the existing week untouched.
+            await client.query('BEGIN');
+            try {
+                await dropCurrentWeek(client);
+                const result = await client.query(sql);
+                const last = (Array.isArray(result) ? result[result.length - 1] : result) as QueryResult<{ slug?: string }>;
+                orphanSlugs = (last?.rows ?? []).map((r) => r.slug).filter(Boolean) as string[];
+                await client.query('COMMIT');
+            } catch (err) {
+                await client.query('ROLLBACK');
+                console.error('[promote] --same-week: rolled back, the existing week is intact');
+                throw err;
+            }
+        } else {
+            const result = await client.query(sql);
+            // node-postgres returns the last command's result for multi-statement queries.
+            // The trailing SELECT in promote_and_rank.sql returns the deleted orphan slugs.
+            const last = (Array.isArray(result) ? result[result.length - 1] : result) as QueryResult<{ slug?: string }>;
+            orphanSlugs = (last?.rows ?? []).map((r) => r.slug).filter(Boolean) as string[];
+        }
     } finally {
         client.release();
     }

@@ -1,38 +1,80 @@
 /**
- * Data-completeness gate, run immediately before the weekly promote.
+ * The gate the weekly promote runs behind. Exits 0 to allow it, 1 to hold.
  *
  * Context: on 2026-09-20 Letterboxd degraded for several minutes mid-sync. The
  * per-member try/catch in syncAllRatings swallowed 26 consecutive failures, the
- * sync reported success, and promote swapped that incomplete data into the live
- * tables. Those 26 members landed with a NULL num_films_watched, which (a) sorts
- * first under `ORDER BY num_films_watched DESC` and (b) crashed the members
- * page client-side. Nothing alerted, because nothing had failed loudly.
+ * sync reported success, and promote swapped the incomplete data into the live
+ * tables. Nothing alerted, because nothing had failed loudly.
  *
- * So this checks the staging data *about to go live* rather than parsing logs:
- * an invariant on the rows themselves can't be fooled by a job that exited 0.
+ * Policy is zero tolerance. The rankings are an average across the whole
+ * community, so a member missing their ratings doesn't merely omit that member
+ * — it shifts every film they would have rated. A "mostly complete" week is a
+ * wrong week, not a slightly stale one.
  *
- * Policy: zero tolerance. Any incomplete member blocks the promote.
+ * This checks the staging rows about to go live rather than parsing logs: an
+ * invariant on the data itself can't be fooled by a job that exited 0.
  *
- * The rankings are an average across the whole community, so a member missing
- * their ratings doesn't just omit that member — it shifts every film they would
- * have rated. A "mostly complete" week is a wrong week, not a slightly stale
- * one. Blocking keeps last week's correct data live until the sync is redone.
- *
- * Exits 0 to allow the promote, 1 to block it. The crontab runs it as the first
- * link of the `&&` chain, so a non-zero exit stops the whole weekly pipeline.
+ * Designed to be run repeatedly (the crontab fires it hourly through Monday)
+ * so a week still lands after the sync has spent hours waiting out an outage.
+ * The three hold conditions are ordered cheapest-first and all no-op quietly;
+ * only a genuinely stuck week emails, and only once per week.
  */
 import 'dotenv/config';
 import '../lib/log-timestamps.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import pool from '../db/conn.js';
 import { sendCriticalAlert } from '../lib/alert.js';
 
-/** Zero tolerance: any incomplete member blocks the promote. */
-const BLOCK_THRESHOLD = 0;
+const execFileAsync = promisify(execFile);
+
+/**
+ * How long after the week rolls over before an unpromoted week is treated as
+ * stuck rather than merely late. The sync can legitimately spend hours waiting
+ * out a Letterboxd outage; this is comfortably past that but still leaves most
+ * of Monday to react.
+ */
+const STUCK_AFTER_HOURS = 14;
 
 interface IncompleteMember {
     username: string;
     num_films_watched: number | null;
     rating_count: number;
+}
+
+/** True once this week's rankings have been computed — makes reruns no-ops. */
+async function alreadyPromotedThisWeek(): Promise<boolean> {
+    const { rows } = await pool.query<{ done: boolean }>(`
+        SELECT COALESCE(
+            MAX(week_computed_at AT TIME ZONE 'America/New_York')
+                >= date_trunc('week', NOW() AT TIME ZONE 'America/New_York'),
+            false
+        ) AS done
+        FROM film_rankings_history
+        WHERE network = 'metro'
+    `);
+    return rows[0]?.done === true;
+}
+
+/** Hours since the current week began (Monday 00:00 ET). */
+async function hoursIntoWeek(): Promise<number> {
+    const { rows } = await pool.query<{ hrs: string }>(`
+        SELECT EXTRACT(EPOCH FROM (
+            (NOW() AT TIME ZONE 'America/New_York') - date_trunc('week', NOW() AT TIME ZONE 'America/New_York')
+        )) / 3600 AS hrs
+    `);
+    return Number(rows[0]?.hrs ?? 0);
+}
+
+/** A sync still running means staging is mid-write, not broken. */
+async function syncInProgress(): Promise<boolean> {
+    try {
+        const { stdout } = await execFileAsync('pgrep', ['-f', 'dist/sync/index.js']);
+        return stdout.trim().length > 0;
+    } catch {
+        // pgrep exits 1 when nothing matches.
+        return false;
+    }
 }
 
 async function findIncompleteMembers(): Promise<IncompleteMember[]> {
@@ -53,49 +95,101 @@ async function findIncompleteMembers(): Promise<IncompleteMember[]> {
     return rows;
 }
 
-async function main() {
+/** Emails at most once per week, so hourly reruns don't become hourly mail. */
+async function alertOncePerWeek(subject: string, body: string): Promise<void> {
+    const { rows } = await pool.query<{ fresh: boolean }>(`
+        INSERT INTO promote_alert_log (week_start, subject)
+        VALUES (date_trunc('week', NOW() AT TIME ZONE 'America/New_York'), $1)
+        ON CONFLICT (week_start, subject) DO NOTHING
+        RETURNING true AS fresh
+    `, [subject]);
+    if (rows.length === 0) {
+        console.log(`[preflight] already alerted this week for "${subject}" — staying quiet`);
+        return;
+    }
+    await sendCriticalAlert(subject, body);
+}
+
+async function main(): Promise<number> {
+    // --redo: deliberately recompute a week that has already been promoted,
+    // for when its source data turned out to be wrong. Pairs with
+    // `promote --same-week`, which keeps the week number from advancing.
+    // The completeness checks below still apply in full.
+    const redo = process.argv.includes('--redo');
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS promote_alert_log (
+            week_start date NOT NULL,
+            subject    text NOT NULL,
+            sent_at    timestamptz NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (week_start, subject)
+        )
+    `);
+
+    if (await alreadyPromotedThisWeek()) {
+        if (!redo) {
+            console.log('[preflight] this week is already promoted — nothing to do');
+            return 1;
+        }
+        console.log('[preflight] --redo: this week is already promoted, recomputing it anyway');
+    }
+
+    if (await syncInProgress()) {
+        console.log('[preflight] a sync is still running — holding until it finishes');
+        return 1;
+    }
+
     const { rows: [{ total }] } = await pool.query<{ total: string }>(
         'SELECT COUNT(*) AS total FROM users_stg',
     );
     const memberCount = Number(total);
+    const hrs = await hoursIntoWeek();
 
-    // An empty staging table means the sync didn't run or was wiped; promoting
-    // that would truncate the live tables and take the whole site down.
+    // Empty staging means the sync hasn't populated it (or was wiped).
+    // Promoting that would truncate the live tables and take the site down.
     if (memberCount === 0) {
-        await sendCriticalAlert(
-            'promote BLOCKED — staging is empty',
-            'users_stg has 0 rows. The weekly sync did not populate staging, and promoting\n' +
-            'would truncate the live tables. Promote was blocked; the live site still has\n' +
-            'last week\'s data.\n\n' +
-            'Check the most recent dumps/sync_*.log on the VPS.',
-        );
+        console.log(`[preflight] staging is empty (${hrs.toFixed(1)}h into the week)`);
+        if (hrs >= STUCK_AFTER_HOURS) {
+            await alertOncePerWeek(
+                'promote STUCK — staging is empty',
+                `users_stg has 0 rows and it is ${hrs.toFixed(1)}h into the week, so the sync has not\n` +
+                `populated staging. Promoting would truncate the live tables, so it is being held.\n` +
+                `The live site still shows last week's data.\n\n` +
+                `Check the most recent dumps/sync_*.log and dumps/resync_*.log on the VPS.`,
+            );
+        }
         return 1;
     }
 
     const incomplete = await findIncompleteMembers();
-    console.log(`[preflight] ${memberCount} members in staging, ${incomplete.length} incomplete`);
+    console.log(`[preflight] ${memberCount} members in staging, ${incomplete.length} incomplete, ${hrs.toFixed(1)}h into the week`);
 
     if (incomplete.length === 0) {
         console.log('[preflight] OK — promote may proceed');
         return 0;
     }
 
+    // Incomplete but no sync running: the sync gave up, or died. The hourly
+    // rerun keeps checking in case a manual re-sync fixes it.
     const detail = incomplete
         .map((m) => `  ${m.username}: watched=${m.num_films_watched ?? 'NULL'}, ratings=${m.rating_count}`)
         .join('\n');
+    console.error(`[preflight] HOLDING — ${incomplete.length}/${memberCount} members incomplete`);
 
-    await sendCriticalAlert(
-        `promote BLOCKED — ${incomplete.length}/${memberCount} members incomplete`,
-        `${incomplete.length} of ${memberCount} members have incomplete data in staging, so the\n` +
-        `promote was BLOCKED. The live site still shows last week's complete data.\n\n` +
-        `Incomplete members:\n${detail}\n\n` +
-        `Usual cause is Letterboxd being unreachable during those members' leg of the sync.\n` +
-        `Check the most recent dumps/sync_*.log for "[ratings] member ... failed".\n\n` +
-        `The sync normally waits out a Letterboxd outage and resumes on its own, so\n` +
-        `reaching this point means the outage outlasted that wait. To retry by hand:\n` +
-        `  cd /root/mkdb && npm run sync && npm run preflight-promote && npm run promote`,
-    );
-
+    if (hrs >= STUCK_AFTER_HOURS) {
+        await alertOncePerWeek(
+            `promote STUCK — ${incomplete.length}/${memberCount} members incomplete`,
+            `${incomplete.length} of ${memberCount} members have incomplete data in staging and no sync is\n` +
+            `running, ${hrs.toFixed(1)}h into the week. The promote is being held, so the live site still\n` +
+            `shows last week's complete data.\n\n` +
+            `Incomplete members:\n${detail}\n\n` +
+            `The sync waits out a Letterboxd outage on its own and resumes, so reaching this\n` +
+            `point means the outage outlasted that wait or the sync died.\n\n` +
+            `To retry by hand:\n` +
+            `  cd /root/mkdb && npm run sync\n` +
+            `The hourly promote check will pick it up automatically once staging is complete.`,
+        );
+    }
     return 1;
 }
 
@@ -108,9 +202,9 @@ main()
         console.error('[preflight] fatal:', err);
         // A gate that can't run is not a reason to promote blindly.
         await sendCriticalAlert(
-            'promote BLOCKED — preflight check itself failed',
+            'promote held — preflight check itself failed',
             `The pre-promote data check threw before it could reach a verdict:\n\n${err?.stack || err}\n\n` +
-            `Promote was blocked as a precaution.`,
+            `The promote was held as a precaution.`,
         );
         await pool.end().catch(() => {});
         process.exit(1);
